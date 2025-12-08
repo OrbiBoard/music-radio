@@ -187,7 +187,7 @@ const functions = {
       const q = String(keyword || '').trim();
       if (!q) return { ok: false, error: 'empty keyword' };
       const https = require('https');
-      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'LessonPlugin/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
+      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
       const data = await fetchJson(`https://api.3r60.top/v2/bili/s/?keydown=${encodeURIComponent(q)}`);
       const arr = data && data.data && Array.isArray(data.data.result) ? data.data.result : [];
       const pageSize = 20;
@@ -230,7 +230,7 @@ const functions = {
       const https = require('https');
       const fs = require('fs');
       const os = require('os');
-      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'LessonPlugin/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
+      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
       let c = String(cid || '');
       if (!c || c === 'default') {
         const v = await fetchJson(`https://api.bilibili.com/x/player/pagelist?bvid=${encodeURIComponent(String(bvid||''))}`);
@@ -241,7 +241,7 @@ const functions = {
       const durl = info && info.data && Array.isArray(info.data.durl) ? info.data.durl : [];
       const url0 = durl[0] && durl[0].url ? durl[0].url : null;
       if (!url0) return { ok: false, error: 'resolve failed' };
-      const tempDir = require('path').join(os.tmpdir(), 'lessonplugin.radio.bilibili', 'cache');
+      const tempDir = require('path').join(os.tmpdir(), 'orbiboard.radio.bilibili', 'cache');
       try { if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true }); } catch {}
       const fileName = `${String(bvid)}-${String(c)}.mp4`;
       const cachePath = require('path').join(tempDir, fileName);
@@ -279,7 +279,7 @@ const functions = {
       const q = String(quality || 'standard');
       const api = `https://api.limeasy.cn/kwmpro/v1/?id=${encodeURIComponent(String(id||''))}&quality=${encodeURIComponent(q)}`;
       const data = await new Promise((resolve, reject) => {
-        https.get(api, { headers: { 'User-Agent': 'LessonPlugin/Radio' } }, (res) => {
+        https.get(api, { headers: { 'User-Agent': 'OrbiBoard/Radio' } }, (res) => {
           const chunks = []; res.on('data', (c) => chunks.push(c));
           res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { reject(e); } });
         }).on('error', reject);

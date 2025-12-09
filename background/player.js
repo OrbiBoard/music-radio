@@ -23,6 +23,188 @@ window.addEventListener('DOMContentLoaded', () => {
   const biliCollapseBtn = document.getElementById('biliCollapseBtn');
   const biliExpandBtn = document.getElementById('biliExpandBtn');
   const bgModePanel = document.getElementById('bgModePanel');
+  try {
+    if (!localStorage.getItem('radio.icon.scale.min')) localStorage.setItem('radio.icon.scale.min','1.00');
+    if (!localStorage.getItem('radio.icon.scale.max')) localStorage.setItem('radio.icon.scale.max','2.50');
+    if (!localStorage.getItem('radio.analysis.fftSize')) localStorage.setItem('radio.analysis.fftSize','2048');
+    if (!localStorage.getItem('radio.analysis.smoothing')) localStorage.setItem('radio.analysis.smoothing','0.6');
+    if (!localStorage.getItem('radio.tempo.factor.min')) localStorage.setItem('radio.tempo.factor.min','0.85');
+    if (!localStorage.getItem('radio.tempo.factor.max')) localStorage.setItem('radio.tempo.factor.max','1.25');
+    if (!localStorage.getItem('radio.volume.weight')) localStorage.setItem('radio.volume.weight','0.7');
+    if (!localStorage.getItem('radio.volume.boost')) localStorage.setItem('radio.volume.boost','14');
+    if (!localStorage.getItem('radio.volume.smoothing')) localStorage.setItem('radio.volume.smoothing','0.9');
+    if (!localStorage.getItem('radio.icon.scale.gamma')) localStorage.setItem('radio.icon.scale.gamma','0.4');
+    if (!localStorage.getItem('radio.band.alpha')) localStorage.setItem('radio.band.alpha','0.7');
+    if (!localStorage.getItem('radio.band.base.smoothing')) localStorage.setItem('radio.band.base.smoothing','0.97');
+    if (!localStorage.getItem('radio.band.gain1')) localStorage.setItem('radio.band.gain1','1.0');
+    if (!localStorage.getItem('radio.band.gain2')) localStorage.setItem('radio.band.gain2','1.1');
+    if (!localStorage.getItem('radio.band.gain3')) localStorage.setItem('radio.band.gain3','1.25');
+    if (!localStorage.getItem('radio.band.gain4')) localStorage.setItem('radio.band.gain4','1.5');
+  } catch {}
+  let audioCtx = null;
+  let analyser = null;
+  let mediaSrc = null;
+  let freqBuf = null;
+  let timeBuf = null;
+  let scaleLast = [1,1,1,1];
+  let analysisRunning = false;
+  let lastSpec = null;
+  let fluxEma = 0;
+  let lastPeakTs = 0;
+  const peakTimes = [];
+  let tempoSmooth = 1;
+  let volEma = 0;
+  function setRotatePlayState(running){
+    try {
+      const ex = document.getElementById('EX_background_fluentShine');
+      if (!ex) return;
+      const arr = ex.querySelectorAll('.fluentShine');
+      arr.forEach((el)=>{ el.style.animationPlayState = running ? 'running' : 'paused'; });
+    } catch {}
+  }
+  function updateRotateDurations(k){
+    const style = document.getElementById('EX_background_fluentShine_style');
+    if (!style) return;
+    let baseStr = style.dataset && style.dataset.baseDur ? style.dataset.baseDur : '';
+    let base = null;
+    if (baseStr) {
+      base = baseStr.split(',').map(x=>parseFloat(x)).filter(x=>Number.isFinite(x)&&x>0);
+    }
+    if (!base || base.length!==4){
+      const txt = String(style.textContent||'');
+      const re = /\.fluentShine:nth-child\((\d)\)\{animation:[^ ]+ ([0-9.]+)s/gi;
+      const arr = [null,null,null,null];
+      let m;
+      while ((m = re.exec(txt))) { const idx = parseInt(m[1],10)-1; if (idx>=0&&idx<4) arr[idx] = parseFloat(m[2]); }
+      base = arr.map((v,i)=>Number.isFinite(v)?v:[15,12,18,14][i]);
+      if (style.dataset) style.dataset.baseDur = base.join(',');
+    }
+    const dur = base.map(v=>v*Math.max(0.5, Math.min(2.0, k)));
+    let txt = String(style.textContent||'');
+    txt = txt.replace(/(\.fluentShine:nth-child\(1\)\{animation:[^ ]+ )([0-9.]+)(s)/, `$1${dur[0]}$3`);
+    txt = txt.replace(/(\.fluentShine:nth-child\(2\)\{animation:[^ ]+ )([0-9.]+)(s)/, `$1${dur[1]}$3`);
+    txt = txt.replace(/(\.fluentShine:nth-child\(3\)\{animation:[^ ]+ )([0-9.]+)(s)/, `$1${dur[2]}$3`);
+    txt = txt.replace(/(\.fluentShine:nth-child\(4\)\{animation:[^ ]+ )([0-9.]+)(s)/, `$1${dur[3]}$3`);
+    style.textContent = txt;
+  }
+  function setupAudioAnalysis(){
+    if (!audio) return;
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    } catch { return; }
+    if (!audioCtx) return;
+    try {
+      if (!analyser) analyser = audioCtx.createAnalyser();
+      analyser.fftSize = (parseInt(localStorage.getItem('radio.analysis.fftSize')||'2048',10)||2048);
+      analyser.smoothingTimeConstant = Math.min(0.99, Math.max(0, parseFloat(localStorage.getItem('radio.analysis.smoothing')||'0.8')));
+      if (!mediaSrc) mediaSrc = audioCtx.createMediaElementSource(audio);
+      mediaSrc.connect(analyser);
+      analyser.connect(audioCtx.destination);
+      freqBuf = new Uint8Array(analyser.frequencyBinCount);
+      try { timeBuf = new Float32Array(analyser.fftSize || 2048); } catch { timeBuf = new Float32Array(2048); }
+      analysisRunning = true;
+    } catch {}
+    const ch = new URL(location.href).searchParams.get('channel')||'';
+    const ids = ['tab-recommend','tab-search','tab-settings','tab-about'];
+    const minScale = Math.max(1, parseFloat(localStorage.getItem('radio.icon.scale.min')||'1.0'));
+    const maxScale = Math.max(minScale, parseFloat(localStorage.getItem('radio.icon.scale.max')||'2.5'));
+    const gamma = Math.min(2, Math.max(0.1, parseFloat(localStorage.getItem('radio.icon.scale.gamma')||'0.4')));
+    const baseSmooth = Math.min(0.999, Math.max(0, parseFloat(localStorage.getItem('radio.band.base.smoothing')||'0.95')));
+    const mixAlpha = Math.max(0, Math.min(1, parseFloat(localStorage.getItem('radio.band.alpha')||'0.7')));
+    const bandG = [
+      parseFloat(localStorage.getItem('radio.band.gain1')||'1.0'),
+      parseFloat(localStorage.getItem('radio.band.gain2')||'1.1'),
+      parseFloat(localStorage.getItem('radio.band.gain3')||'1.25'),
+      parseFloat(localStorage.getItem('radio.band.gain4')||'1.5')
+    ];
+    const bins = analyser ? analyser.frequencyBinCount : 0;
+    const sr = audioCtx.sampleRate||44100;
+    function fToBin(f){ const nyq = sr/2; const idx = Math.floor((f/nyq)*(bins-1)); return Math.max(0, Math.min(bins-1, idx)); }
+    const ranges = [ [20,250],[250,1000],[1000,4000],[4000,16000] ].map(([a,b])=>[fToBin(a),fToBin(b)]);
+    const ema = [0,0,0,0];
+    const baseEma = [0,0,0,0];
+    const bandV = [0,0,0,0];
+    let lastEmitTs = 0;
+    let lastTempoTs = 0;
+    function loop(){
+      if (!analysisRunning || !analyser) return;
+      try { analyser.getByteFrequencyData(freqBuf); } catch { requestAnimationFrame(loop); return; }
+      try { if (timeBuf && timeBuf.length) analyser.getFloatTimeDomainData(timeBuf); } catch {}
+      for (let i=0;i<4;i++){
+        const [s,e] = ranges[i];
+        let sum=0; let n=Math.max(1, e-s+1);
+        for (let k=s;k<=e;k++) sum+=freqBuf[k]||0;
+        const v = sum/(n*255);
+        ema[i] = ema[i] ? (ema[i]*0.85 + v*0.15) : v;
+        baseEma[i] = baseEma[i] ? (baseEma[i]*baseSmooth + v*(1-baseSmooth)) : v;
+        bandV[i] = v;
+      }
+      if (!lastSpec) lastSpec = new Float32Array(freqBuf.length);
+      let flux = 0;
+      for (let i=0;i<freqBuf.length;i++){ const d = (freqBuf[i]||0) - (lastSpec[i]||0); if (d>0) flux += d; lastSpec[i] = freqBuf[i]; }
+      fluxEma = fluxEma ? (fluxEma*0.9 + flux*0.1) : flux;
+      const thr = fluxEma*1.6;
+      const now = Date.now();
+      if (flux>thr && (now - lastPeakTs) > 250){ lastPeakTs = now; peakTimes.push(now); while (peakTimes.length && (now - peakTimes[0]) > 8000) peakTimes.shift(); }
+      if (now - lastTempoTs > 1000){
+        lastTempoTs = now;
+        let bpm = 0;
+        if (peakTimes.length >= 2){ const span = (peakTimes[peakTimes.length-1] - peakTimes[0]) / 1000; const count = peakTimes.length - 1; if (span>0) bpm = (count/span)*60; }
+        const minF = Math.max(0.5, parseFloat(localStorage.getItem('radio.tempo.factor.min')||'0.85'));
+        const maxF = Math.max(minF, parseFloat(localStorage.getItem('radio.tempo.factor.max')||'1.25'));
+        const k = bpm>0 ? Math.pow(120/Math.max(60, Math.min(180, bpm)), 0.5) : 1;
+        tempoSmooth = tempoSmooth ? (tempoSmooth*0.9 + k*0.1) : k;
+        const kClamped = Math.max(minF, Math.min(maxF, tempoSmooth));
+        updateRotateDurations(kClamped);
+      }
+      const volBoost = Math.max(1, parseFloat(localStorage.getItem('radio.volume.boost')||'14'));
+      const volSmooth = Math.min(0.99, Math.max(0, parseFloat(localStorage.getItem('radio.volume.smoothing')||'0.7')));
+      let rms = 0;
+      if (timeBuf && timeBuf.length) {
+        let sumSq = 0; const n = timeBuf.length;
+        for (let i=0;i<n;i++) { const v = timeBuf[i]||0; sumSq += v*v; }
+        rms = Math.sqrt(sumSq / Math.max(1, timeBuf.length));
+      }
+      volEma = volEma ? (volEma*volSmooth + rms*(1-volSmooth)) : rms;
+      const tVol = Math.max(0, Math.min(1, volEma * volBoost));
+      const wVol = Math.max(0, Math.min(1, parseFloat(localStorage.getItem('radio.volume.weight')||'0.7')));
+      const volFloor = Math.max(0, Math.min(0.9, parseFloat(localStorage.getItem('radio.volume.floor')||'0.25')));
+      const volPower = Math.max(1, Math.min(4, parseFloat(localStorage.getItem('radio.volume.power')||'1.5')));
+      let tVolEff = 0;
+      if (tVol > volFloor) {
+        tVolEff = Math.pow((tVol - volFloor) / Math.max(1e-6, (1 - volFloor)), volPower);
+        tVolEff = Math.max(0, Math.min(1, tVolEff));
+      }
+      const scales = [0,1,2,3].map((i)=>{
+        const base = Math.max(1e-6, baseEma[i]||1e-6);
+        const rel = Math.max(0, (bandV[i]||0) - base) / base;
+        const tRaw = Math.max(0, Math.min(1, rel * bandG[i]));
+        const tBand = Math.max(0, Math.min(1, mixAlpha * tRaw + (1 - mixAlpha) * (bandV[i]||0)));
+        const tBandGamma = Math.pow(tBand, gamma);
+        const tBandAdj = tBandGamma * (0.75 + 0.25 * tVolEff);
+        const tMix = Math.max(0, Math.min(1, tBandAdj * (1 + wVol * tVolEff)));
+        return minScale + tMix*(maxScale-minScale);
+      });
+      let needEmit = false;
+      for (let i=0;i<4;i++){ if (Math.abs(scales[i]-scaleLast[i])>0.01) { needEmit=true; break; } }
+      const now2 = Date.now();
+      if (needEmit && (now2 - lastEmitTs > 33)){
+        lastEmitTs = now2;
+        try {
+          const ex2 = document.getElementById('EX_background_fluentShine');
+          if (ex2) {
+            ex2.style.setProperty('--shine-s1', String(scales[0]||1));
+            ex2.style.setProperty('--shine-s2', String(scales[1]||1));
+            ex2.style.setProperty('--shine-s3', String(scales[2]||1));
+            ex2.style.setProperty('--shine-s4', String(scales[3]||1));
+          }
+        } catch {}
+        scaleLast = scales;
+      }
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  }
   let biliMode = localStorage.getItem('radio.biliVideo.mode') || 'float';
   function applyBiliMode(){ try {
     if (!biliFloat || !biliToolbar) return;
@@ -57,24 +239,26 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   } catch {} }
   function setBiliMode(m){ biliMode = m; try { localStorage.setItem('radio.biliVideo.mode', biliMode); } catch {} applyBiliMode(); }
-  if (musicUrl) {
-    audio.src = musicUrl;
-    audioBar.style.display = 'flex';
-    audioCover.src = albumUrl || '';
-    audioTitle.textContent = title || '';
-    audioArtist.textContent = artist || '';
-    if (songLoading) songLoading.style.display = 'flex';
-    try { audio.play(); } catch { }
-    try { updateFullscreenStyles(); let tries = 0; const tmr = setInterval(() => { updateFullscreenStyles(); if (++tries >= 10) clearInterval(tmr); }, 100); } catch { }
-    if (musicSource === 'bili' && biliFloat && biliVideo) {
-      biliFloat.style.display = 'block';
-      try { biliVideo.src = musicUrl; biliVideo.muted = true; biliVideo.play(); } catch { }
-      applyBiliMode();
-    } else {
-      if (biliFloat) biliFloat.style.display = 'none';
-      if (biliToolbar) biliToolbar.style.display = 'none';
+    if (musicUrl) {
+      audio.src = musicUrl;
+      audioBar.style.display = 'flex';
+      audioCover.src = albumUrl || '';
+      audioTitle.textContent = title || '';
+      audioArtist.textContent = artist || '';
+      if (songLoading) songLoading.style.display = 'flex';
+      try { audio.play(); } catch { }
+      try { setupAudioAnalysis(); } catch { }
+      setRotatePlayState(true);
+      try { updateFullscreenStyles(); let tries = 0; const tmr = setInterval(() => { updateFullscreenStyles(); if (++tries >= 10) clearInterval(tmr); }, 100); } catch { }
+      if (musicSource === 'bili' && biliFloat && biliVideo) {
+        biliFloat.style.display = 'block';
+        try { biliVideo.src = musicUrl; biliVideo.muted = true; biliVideo.play(); } catch { }
+        applyBiliMode();
+      } else {
+        if (biliFloat) biliFloat.style.display = 'none';
+        if (biliToolbar) biliToolbar.style.display = 'none';
+      }
     }
-  }
   function applyBlurBackground(urlStr) {
     if (!bgRule) return;
     bgRule.textContent = `body::before{content:'';position:absolute;inset:0;background:url(${urlStr}) center/cover;filter:blur(${28}px) brightness(${0.6});z-index:-1;}`;
@@ -90,6 +274,12 @@ window.addEventListener('DOMContentLoaded', () => {
       ex.style.position = 'absolute';
       ex.style.inset = '0';
       ex.style.zIndex = '-1';
+      try {
+        ex.style.setProperty('--shine-s1','1');
+        ex.style.setProperty('--shine-s2','1');
+        ex.style.setProperty('--shine-s3','1');
+        ex.style.setProperty('--shine-s4','1');
+      } catch {}
       document.body.appendChild(ex);
       for (let i = 1; i <= 4; i++) {
         const d = document.createElement('div');
@@ -109,13 +299,17 @@ window.addEventListener('DOMContentLoaded', () => {
     const blurPx = Number(localStorage.getItem('radio.bg.blur') || 70);
     const dark = Number(localStorage.getItem('radio.bg.dark') || 0.6);
     style.textContent = `#EX_background_fluentShine:before{content:'';position:absolute;inset:0;background:url(${urlStr}) center/cover;filter:blur(${blurPx}px) brightness(${dark});z-index:-1;}
-    .fluentShine:before{content:'';position:absolute;inset:0;background:url(${urlStr}) center/cover;filter:blur(${blurPx}px) brightness(${dark});z-index:-1;}
+    .fluentShine:before{content:'';position:absolute;inset:0;background:url(${urlStr}) center/cover;filter:blur(${blurPx}px) brightness(${dark});z-index:-1;transition:transform 120ms linear;}
     @keyframes rotate-clockwise{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
     @keyframes rotate-counterclockwise{from{transform:rotate(0deg)}to{transform:rotate(-360deg)}}
     .fluentShine:nth-child(1){animation:rotate-clockwise 15s linear infinite}
     .fluentShine:nth-child(2){animation:rotate-counterclockwise 12s linear infinite}
     .fluentShine:nth-child(3){animation:rotate-clockwise 18s linear infinite}
-    .fluentShine:nth-child(4){animation:rotate-counterclockwise 14s linear infinite}`;
+    .fluentShine:nth-child(4){animation:rotate-counterclockwise 14s linear infinite}
+    .fluentShine:nth-child(1):before{transform:scale(var(--shine-s1,1));}
+    .fluentShine:nth-child(2):before{transform:scale(var(--shine-s2,1));}
+    .fluentShine:nth-child(3):before{transform:scale(var(--shine-s3,1));}
+    .fluentShine:nth-child(4):before{transform:scale(var(--shine-s4,1));}`;
   }
   const bgMode = (localStorage.getItem('radio.bgmode') || 'blur');
   if (albumUrl) { if (bgMode === 'shine') applyFluentShine(albumUrl); else applyBlurBackground(albumUrl); }
@@ -244,6 +438,9 @@ window.addEventListener('DOMContentLoaded', () => {
   audio.addEventListener('waiting', () => { if (songLoading) songLoading.style.display = 'flex'; });
   audio.addEventListener('play', () => { if (biliVideo && musicSource === 'bili') { try { biliVideo.play(); } catch { } } });
   audio.addEventListener('pause', () => { if (biliVideo && musicSource === 'bili') { try { biliVideo.pause(); } catch { } } });
+  audio.addEventListener('play', () => { setRotatePlayState(true); });
+  audio.addEventListener('pause', () => { setRotatePlayState(false); });
+  audio.addEventListener('ended', () => { setRotatePlayState(false); });
   audio.addEventListener('timeupdate', () => { if (biliVideo && musicSource === 'bili') { try { const dt = Math.abs((biliVideo.currentTime||0) - (audio.currentTime||0)); if (dt > 0.5) biliVideo.currentTime = audio.currentTime; } catch { } } });
   if (biliCollapseBtn) biliCollapseBtn.onclick = () => { setBiliMode(biliMode === 'hidden' ? 'float' : 'hidden'); };
   if (biliExpandBtn) biliExpandBtn.onclick = () => { setBiliMode(biliMode === 'expand' ? 'float' : 'expand'); };

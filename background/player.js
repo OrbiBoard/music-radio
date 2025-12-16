@@ -116,7 +116,12 @@ window.addEventListener('DOMContentLoaded', () => {
     try {
       if (spectrumCanvas) {
         spectrumCtx = spectrumCanvas.getContext('2d');
-        const resize = () => { spectrumCanvas.width = spectrumCanvas.clientWidth; spectrumCanvas.height = spectrumCanvas.clientHeight; };
+        const resize = () => {
+          const bar = document.getElementById('audioBar');
+          const rect = bar ? bar.getBoundingClientRect() : { width: spectrumCanvas.clientWidth, height: spectrumCanvas.clientHeight };
+          spectrumCanvas.width = Math.max(1, Math.floor(rect.width || spectrumCanvas.clientWidth));
+          spectrumCanvas.height = Math.max(1, Math.floor(rect.height || spectrumCanvas.clientHeight));
+        };
         resize();
         window.addEventListener('resize', resize);
         spectrumCanvas.style.display = spectrumEnabled ? '' : 'none';
@@ -245,7 +250,7 @@ window.addEventListener('DOMContentLoaded', () => {
           const rangesArr = Array.isArray(specRanges) && specRanges.length ? specRanges : [[0, Math.max(0, Math.min(freqBuf.length-1, Math.floor(freqBuf.length/2)))]];
           if (!specEma || specEma.length !== rangesArr.length) specEma = new Array(rangesArr.length).fill(0);
           const bars = rangesArr.length;
-          const bw = Math.max(1, Math.floor(w / bars));
+          const bw = Math.max(1, Math.floor(w / Math.max(1,bars)));
           const alpha = 0.6;
           const gamma = 0.8;
           for (let i=0;i<bars;i++){
@@ -423,32 +428,45 @@ function mountYrc2_pair(yrc) {
   const rest = sorted.filter(l => !hasWordTiming(l));
   const backMs = 300;
   const fwdMs = PAIR_MS;
+  const assigned = new Map();
+  const restAssigned = new Set();
+  for (let k = 0; k < timed.length; k++) {
+    const origin = timed[k];
+    const t0 = parseInt(origin.t || 0, 10) || 0;
+    const tNext = (k + 1 < timed.length) ? (parseInt(timed[k+1].t || 0, 10) || Infinity) : Infinity;
+    const winStartFwd = t0;
+    const winEndFwd = Math.min(t0 + fwdMs, tNext - 1);
+    let best = null; let bestDt = Infinity;
+    // prefer translations between current timed and next timed
+    for (let i = 0; i < rest.length; i++) {
+      const r = rest[i]; if (restAssigned.has(r)) continue;
+      const tr = parseInt(r.t || 0, 10) || 0;
+      if (textOf(r) === textOf(origin)) continue;
+      if (tr >= winStartFwd && tr <= winEndFwd) {
+        const dt = tr - t0;
+        if (dt >= 0 && dt <= fwdMs && dt < bestDt) { best = r; bestDt = dt; }
+      }
+    }
+    // fallback: slight preceding translation
+    if (!best) {
+      const winStartBack = t0 - backMs;
+      for (let i = 0; i < rest.length; i++) {
+        const r = rest[i]; if (restAssigned.has(r)) continue;
+        const tr = parseInt(r.t || 0, 10) || 0;
+        if (textOf(r) === textOf(origin)) continue;
+        if (tr >= winStartBack && tr < t0) {
+          const dt = t0 - tr;
+          if (dt <= backMs && dt < bestDt) { best = r; bestDt = dt; }
+        }
+      }
+    }
+    if (best) { assigned.set(k, best); restAssigned.add(best); }
+  }
   for (let i = 0; i < timed.length; i++) {
     const origin = timed[i];
     const t0 = parseInt(origin.t || 0, 10) || 0;
-    let trans = null;
-    let bestDt = Infinity;
-    // prefer same/after within window
-    for (let j = 0; j < rest.length; j++) {
-      const cand = rest[j]; if (used.has(cand)) continue;
-      const tt = parseInt(cand.t || 0, 10) || 0;
-      const dt = tt - t0;
-      if (dt < 0 || dt > fwdMs) continue;
-      if (textOf(cand) === textOf(origin)) continue;
-      if (Math.abs(dt) < bestDt) { trans = cand; bestDt = Math.abs(dt); }
-    }
-    // fallback: allow slight preceding translation
-    if (!trans) {
-      for (let j = 0; j < rest.length; j++) {
-        const cand = rest[j]; if (used.has(cand)) continue;
-        const tt = parseInt(cand.t || 0, 10) || 0;
-        const dt = t0 - tt;
-        if (dt < 0 || dt > backMs) continue;
-        if (textOf(cand) === textOf(origin)) continue;
-        if (Math.abs(dt) < bestDt) { trans = cand; bestDt = Math.abs(dt); }
-      }
-    }
-    if (trans) used.add(trans);
+    const trans = assigned.get(i) || null;
+    if (trans) restAssigned.add(trans);
     const c = document.createElement('div');
     c.className = 'line';
     const ot = t0;
@@ -463,7 +481,7 @@ function mountYrc2_pair(yrc) {
   }
   // leftover non-timed lines as singles to avoid losing content
   for (const l of rest) {
-    if (used.has(l)) continue;
+    if (restAssigned.has(l)) continue;
     const c = document.createElement('div');
     c.className = 'line single';
     const t0 = parseInt(l.t || 0, 10) || 0;
@@ -584,7 +602,7 @@ function mountYrc2_pair(yrc) {
   if (playBtn) { playBtn.onclick = () => { try { if (audio.paused) { audio.play(); playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; } else { audio.pause(); playBtn.innerHTML = '<i class="ri-play-fill"></i>'; } } catch { } }; audio.addEventListener('play', () => { playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; }); audio.addEventListener('pause', () => { playBtn.innerHTML = '<i class="ri-play-fill"></i>'; }); }
   try { audio.addEventListener('play', updateFullscreenStyles); } catch { }
 });
-function updateFullscreenStyles() { try { const fsMatch = (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches); const fs = !!document.fullscreenElement || fsMatch || (window.innerHeight >= (screen.availHeight - 1)); const bar = document.getElementById('audioBar'); if (bar) bar.style.bottom = fs ? '96px' : '16px'; const content = document.querySelector('.content-area'); const spectrumWrap = document.querySelector('.audio-spectrum'); if (bar && content) { const rect = bar.getBoundingClientRect(); const barH = Math.max(64, Math.floor(rect.height || 64)); const barBottomPx = parseInt(String(bar.style.bottom || '16').replace('px', ''), 10) || 16; const padding = 16; let specH = 40; try { const sr = spectrumWrap ? spectrumWrap.getBoundingClientRect() : null; if (sr) specH = Math.max(24, Math.floor(sr.height || 40)); } catch {} if (spectrumWrap) spectrumWrap.style.bottom = `${barBottomPx + barH + 8}px`; const offset = barBottomPx + barH + 8 + specH + padding; content.style.bottom = `${offset}px`; } } catch { } }
+function updateFullscreenStyles() { try { const fsMatch = (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches); const fs = !!document.fullscreenElement || fsMatch || (window.innerHeight >= (screen.availHeight - 1)); const bar = document.getElementById('audioBar'); if (bar) bar.style.bottom = fs ? '96px' : '16px'; const content = document.querySelector('.content-area'); if (bar && content) { const rect = bar.getBoundingClientRect(); const barH = Math.max(64, Math.floor(rect.height || 64)); const barBottomPx = parseInt(String(bar.style.bottom || '16').replace('px', ''), 10) || 16; const padding = 16; const offset = barBottomPx + barH + padding; content.style.bottom = `${offset}px`; } } catch { } }
 updateFullscreenStyles();
 window.addEventListener('resize', updateFullscreenStyles);
 document.addEventListener('fullscreenchange', updateFullscreenStyles);

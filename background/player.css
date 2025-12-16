@@ -52,6 +52,8 @@ html, body { height: 100%; margin: 0; background: transparent; color: #eee; font
 .audio-progress-bar { flex:1; height: 4px; margin: 6px 0; background: #222; border-radius: 4px; position: relative; cursor: pointer; }
 .audio-progress { height:100%; width:0; background:#6ab4ff; border-radius:4px; }
 .audio-progress-dot { position:absolute; top:-4px; width:12px; height:12px; border-radius:50%; background:#6ab4ff; transform: translateX(-50%); left:0; }
+.audio-spectrum { position: absolute; left: 16px; right: 16px; height: 40px; }
+.audio-spectrum canvas { width: 100%; height: 100%; display:block; }
 .audio-bar-inner { display:flex; align-items:center; gap:20px; padding:0 16px; }
 .audio-time { display:none; }
 .audio-btn { border:0; background:transparent; color:#eee; cursor:pointer; font-size:28px; }

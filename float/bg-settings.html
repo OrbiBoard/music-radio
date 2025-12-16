@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>背景设置</title>
+  <link rel="stylesheet" href="../../../renderer/remixicon-local.css" />
+  <style>
+    html, body { height: 100%; margin: 0; background: #181818; color: #e6e6e6; font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; }
+    .wrap { height: 100%; display: flex; flex-direction: column; }
+    header { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid #2a2a2a; }
+    .content { padding: 16px; display: grid; grid-template-columns: 1fr; gap: 14px; }
+    .row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .row label { font-size: 14px; color:#cfcfcf; }
+    .row select, .row input[type="range"], .row input[type="checkbox"] { width: 160px; }
+    .hint { font-size:12px; color:#9c9c9c; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>背景设置</header>
+    <div class="content">
+      <div class="row">
+        <label for="bgMode">背景模式</label>
+        <select id="bgMode">
+          <option value="blur">封面模糊</option>
+          <option value="shine">流动光影</option>
+        </select>
+      </div>
+      <div id="blurGroup">
+        <div class="row">
+          <label for="blurPx">模糊强度</label>
+          <input id="blurPx" type="range" min="10" max="120" step="1" />
+        </div>
+        <div class="row">
+          <label for="darkRate">亮度衰减</label>
+          <input id="darkRate" type="range" min="0.2" max="1.0" step="0.01" />
+        </div>
+      </div>
+      <div id="shineGroup">
+        <div class="row">
+          <label for="shineReactive">根据音频律动</label>
+          <input id="shineReactive" type="checkbox" />
+        </div>
+        <div class="hint">启用后，光影缩放与旋转速度会根据频段与音量变化。</div>
+      </div>
+      <div class="row">
+        <label for="spectrumEnabled">可视化频谱</label>
+        <input id="spectrumEnabled" type="checkbox" />
+      </div>
+    </div>
+  </div>
+  <script>
+    (function(){
+      const bgModeEl = document.getElementById('bgMode');
+      const blurEl = document.getElementById('blurPx');
+      const darkEl = document.getElementById('darkRate');
+      const shineReactiveEl = document.getElementById('shineReactive');
+      const spectrumEnabledEl = document.getElementById('spectrumEnabled');
+      const blurGroup = document.getElementById('blurGroup');
+      const shineGroup = document.getElementById('shineGroup');
+      function read(k, def){ try { const v = localStorage.getItem(k); return v===null||v===undefined ? def : v; } catch { return def; } }
+      function write(k, v){ try { localStorage.setItem(k, String(v)); } catch {} }
+      function emitApply(){ try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'update', target:'bgModeApply', value:'apply' }]); } catch {} }
+      function updateGroupVis(){
+        const mode = String(bgModeEl.value||'blur');
+        blurGroup.style.display = (mode === 'blur') ? 'block' : 'none';
+        shineGroup.style.display = (mode === 'shine') ? 'block' : 'none';
+      }
+      function init(){
+        bgModeEl.value = String(read('radio.bgmode','blur'));
+        blurEl.value = String(read('radio.bg.blur','70'));
+        darkEl.value = String(read('radio.bg.dark','0.6'));
+        shineReactiveEl.checked = read('radio.shine.audioReactive','1') !== '0';
+        spectrumEnabledEl.checked = read('radio.spectrum.enabled','1') !== '0';
+        updateGroupVis();
+      }
+      init();
+      bgModeEl.addEventListener('change', () => { write('radio.bgmode', bgModeEl.value||'blur'); updateGroupVis(); emitApply(); });
+      blurEl.addEventListener('input', () => { write('radio.bg.blur', blurEl.value||'70'); emitApply(); });
+      darkEl.addEventListener('input', () => { write('radio.bg.dark', darkEl.value||'0.6'); emitApply(); });
+      shineReactiveEl.addEventListener('change', () => { write('radio.shine.audioReactive', shineReactiveEl.checked ? '1':'0'); emitApply(); });
+      spectrumEnabledEl.addEventListener('change', () => { write('radio.spectrum.enabled', spectrumEnabledEl.checked ? '1':'0'); emitApply(); });
+    })();
+  </script>
+</body>
+</html>

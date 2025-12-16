@@ -13,6 +13,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const progress = document.getElementById('audioProgress');
   const progressDot = document.getElementById('audioProgressDot');
   const bgRule = document.getElementById('bgRule');
+  const spectrumCanvas = document.getElementById('audioSpectrum');
   const musicId = params.get('id') || '';
   const lyricsLoading = document.getElementById('lyricsLoading');
   const songLoading = document.getElementById('songLoading');
@@ -40,12 +41,19 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!localStorage.getItem('radio.band.gain2')) localStorage.setItem('radio.band.gain2','1.1');
     if (!localStorage.getItem('radio.band.gain3')) localStorage.setItem('radio.band.gain3','1.25');
     if (!localStorage.getItem('radio.band.gain4')) localStorage.setItem('radio.band.gain4','1.5');
+    if (!localStorage.getItem('radio.shine.audioReactive')) localStorage.setItem('radio.shine.audioReactive','1');
   } catch {}
   let audioCtx = null;
   let analyser = null;
   let mediaSrc = null;
   let freqBuf = null;
   let timeBuf = null;
+  let spectrumCtx = null;
+  let spectrumEnabled = false;
+  let lastSpecDrawTs = 0;
+  let specEma = null;
+  let specRanges = null;
+  let specBars = 48;
   let scaleLast = [1,1,1,1];
   let analysisRunning = false;
   let lastSpec = null;
@@ -104,6 +112,16 @@ window.addEventListener('DOMContentLoaded', () => {
       try { timeBuf = new Float32Array(analyser.fftSize || 2048); } catch { timeBuf = new Float32Array(2048); }
       analysisRunning = true;
     } catch {}
+    spectrumEnabled = (String(localStorage.getItem('radio.spectrum.enabled')||'1') !== '0');
+    try {
+      if (spectrumCanvas) {
+        spectrumCtx = spectrumCanvas.getContext('2d');
+        const resize = () => { spectrumCanvas.width = spectrumCanvas.clientWidth; spectrumCanvas.height = spectrumCanvas.clientHeight; };
+        resize();
+        window.addEventListener('resize', resize);
+        spectrumCanvas.style.display = spectrumEnabled ? '' : 'none';
+      }
+    } catch {}
     const ch = new URL(location.href).searchParams.get('channel')||'';
     const ids = ['tab-recommend','tab-search','tab-settings','tab-about'];
     const minScale = Math.max(1, parseFloat(localStorage.getItem('radio.icon.scale.min')||'1.0'));
@@ -121,6 +139,21 @@ window.addEventListener('DOMContentLoaded', () => {
     const sr = audioCtx.sampleRate||44100;
     function fToBin(f){ const nyq = sr/2; const idx = Math.floor((f/nyq)*(bins-1)); return Math.max(0, Math.min(bins-1, idx)); }
     const ranges = [ [20,250],[250,1000],[1000,4000],[4000,16000] ].map(([a,b])=>[fToBin(a),fToBin(b)]);
+    try {
+      const fMin = 30, fMax = 16000;
+      const logMin = Math.log(fMin), logMax = Math.log(fMax);
+      const bars = Math.max(16, Math.min(96, specBars||48));
+      const out = [];
+      for (let i=0;i<bars;i++){
+        const f1 = Math.exp(logMin + (i/bars)*(logMax - logMin));
+        const f2 = Math.exp(logMin + ((i+1)/bars)*(logMax - logMin));
+        const s = fToBin(f1), e = fToBin(f2);
+        out.push([Math.min(s,e), Math.max(s,e)]);
+      }
+      specRanges = out;
+      specEma = new Array(specRanges.length).fill(0);
+      specBars = bars;
+    } catch {}
     const ema = [0,0,0,0];
     const baseEma = [0,0,0,0];
     const bandV = [0,0,0,0];
@@ -146,7 +179,8 @@ window.addEventListener('DOMContentLoaded', () => {
       const thr = fluxEma*1.6;
       const now = Date.now();
       if (flux>thr && (now - lastPeakTs) > 250){ lastPeakTs = now; peakTimes.push(now); while (peakTimes.length && (now - peakTimes[0]) > 8000) peakTimes.shift(); }
-      if (now - lastTempoTs > 1000){
+      const shineReactive = (String(localStorage.getItem('radio.shine.audioReactive')||'1') !== '0');
+      if (shineReactive && (now - lastTempoTs > 1000)){
         lastTempoTs = now;
         let bpm = 0;
         if (peakTimes.length >= 2){ const span = (peakTimes[peakTimes.length-1] - peakTimes[0]) / 1000; const count = peakTimes.length - 1; if (span>0) bpm = (count/span)*60; }
@@ -192,7 +226,7 @@ window.addEventListener('DOMContentLoaded', () => {
         lastEmitTs = now2;
         try {
           const ex2 = document.getElementById('EX_background_fluentShine');
-          if (ex2) {
+          if (ex2 && (String(localStorage.getItem('radio.shine.audioReactive')||'1') !== '0')) {
             ex2.style.setProperty('--shine-s1', String(scales[0]||1));
             ex2.style.setProperty('--shine-s2', String(scales[1]||1));
             ex2.style.setProperty('--shine-s3', String(scales[2]||1));
@@ -201,6 +235,35 @@ window.addEventListener('DOMContentLoaded', () => {
         } catch {}
         scaleLast = scales;
       }
+      try {
+        const nowDraw = Date.now();
+        if (spectrumEnabled && spectrumCtx && freqBuf && freqBuf.length && (nowDraw - lastSpecDrawTs > 33)) {
+          lastSpecDrawTs = nowDraw;
+          const w = spectrumCanvas.width;
+          const h = spectrumCanvas.height;
+          spectrumCtx.clearRect(0,0,w,h);
+          const rangesArr = Array.isArray(specRanges) && specRanges.length ? specRanges : [[0, Math.max(0, Math.min(freqBuf.length-1, Math.floor(freqBuf.length/2)))]];
+          if (!specEma || specEma.length !== rangesArr.length) specEma = new Array(rangesArr.length).fill(0);
+          const bars = rangesArr.length;
+          const bw = Math.max(1, Math.floor(w / bars));
+          const alpha = 0.6;
+          const gamma = 0.8;
+          for (let i=0;i<bars;i++){
+            const [s,e] = rangesArr[i];
+            let sum = 0; const n = Math.max(1, e - s + 1);
+            for (let k = s; k <= e; k++){ sum += freqBuf[k]||0; }
+            const v = sum / n;
+            specEma[i] = specEma[i] ? (specEma[i]*alpha + v*(1-alpha)) : v;
+            let pct = Math.max(0, Math.min(1, specEma[i]/255));
+            pct = Math.pow(pct, gamma);
+            const bh = Math.max(1, Math.floor(pct * h));
+            const x = i*bw;
+            const y = h - bh;
+            spectrumCtx.fillStyle = 'rgba(255,255,255,0.45)';
+            spectrumCtx.fillRect(x, y, bw-1, bh);
+          }
+        }
+      } catch {}
       requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
@@ -335,69 +398,84 @@ window.addEventListener('DOMContentLoaded', () => {
   function isPunc(s) { return /^[\s\.,!\?;:\-–—·、，。！？；：…()（）\[\]\{\}]+$/.test(String(s || '')); }
   function needSpace(a, b) { return !isPunc(a) && !isPunc(b) && !isCJK(a) && !isCJK(b); }
   function hasLatin(s) { return /[A-Za-z\u00C0-\u024F]/.test(String(s || '')); }
-  function mountYrc2_pair(yrc) {
-    const el = document.getElementById('lyrics');
-    if (!el) return;
-    el.innerHTML = '';
-    const AUTO_SCROLL_PAUSE_MS = 4000;
-    const PAIR_MS = 900;
-    const sorted = Array.isArray(yrc) ? yrc.slice().sort((a, b) => (parseInt(a.t || 0, 10) || 0) - (parseInt(b.t || 0, 10) || 0)) : [];
-    const eng = [];
-    const zh = [];
-    const other = [];
-    sorted.forEach(l => { const cjk = l.c.some(w => isCJK(w.tx)); const lat = l.c.some(w => hasLatin(w.tx)); if (lat && !cjk) eng.push(l); else if (cjk) zh.push(l); else other.push(l); });
-    const usedZh = new Set();
-    function makeRow(line, kind) {
-      const row = document.createElement('div');
-      row.className = 'row ' + kind;
-      row.style.whiteSpace = 'normal';
-      row.style.opacity = '0.9';
-      line.c.forEach((w, i) => { const s = document.createElement('span'); s.textContent = w.tx; s.dataset.t = w.t; s.dataset.d = w.d; s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; s.style.opacity = '0.55'; s.style.display = 'inline'; row.appendChild(s); const next = line.c[i + 1]; if (next && needSpace(w.tx, next.tx)) row.appendChild(document.createTextNode(' ')); });
-      return row;
+function mountYrc2_pair(yrc) {
+  const el = document.getElementById('lyrics');
+  if (!el) return;
+  el.innerHTML = '';
+  const AUTO_SCROLL_PAUSE_MS = 4000;
+  const PAIR_MS = 600;
+  const sorted = Array.isArray(yrc) ? yrc.slice().sort((a, b) => (parseInt(a.t || 0, 10) || 0) - (parseInt(b.t || 0, 10) || 0)) : [];
+  function makeRow(line, kind) {
+    const row = document.createElement('div');
+    row.className = 'row ' + kind;
+    row.style.whiteSpace = 'normal';
+    row.style.opacity = '0.9';
+    line.c.forEach((w, i) => { const s = document.createElement('span'); s.textContent = w.tx; s.dataset.t = w.t; s.dataset.d = w.d; s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; s.style.opacity = '0.55'; s.style.display = 'inline'; row.appendChild(s); const next = line.c[i + 1]; if (next && needSpace(w.tx, next.tx)) row.appendChild(document.createTextNode(' ')); });
+    return row;
+  }
+  const textOf = (line) => (line && Array.isArray(line.c)) ? line.c.map(w=>String(w.tx||'')).join('') : '';
+  const hasWordTiming = (line) => {
+    if (!line || !Array.isArray(line.c)) return false;
+    return line.c.some(w => (parseInt(w.d||0,10)||0) > 0);
+  };
+  const used = new Set();
+  const timed = sorted.filter(l => hasWordTiming(l));
+  const rest = sorted.filter(l => !hasWordTiming(l));
+  const backMs = 300;
+  const fwdMs = PAIR_MS;
+  for (let i = 0; i < timed.length; i++) {
+    const origin = timed[i];
+    const t0 = parseInt(origin.t || 0, 10) || 0;
+    let trans = null;
+    let bestDt = Infinity;
+    // prefer same/after within window
+    for (let j = 0; j < rest.length; j++) {
+      const cand = rest[j]; if (used.has(cand)) continue;
+      const tt = parseInt(cand.t || 0, 10) || 0;
+      const dt = tt - t0;
+      if (dt < 0 || dt > fwdMs) continue;
+      if (textOf(cand) === textOf(origin)) continue;
+      if (Math.abs(dt) < bestDt) { trans = cand; bestDt = Math.abs(dt); }
     }
-    const pairs = [];
-    const seq = sorted.slice();
-    for (let i = 0; i < seq.length; i++) {
-      const cur = seq[i];
-      const curIsEng = cur.c ? cur.c.some(w => hasLatin(w.tx)) && !cur.c.some(w => isCJK(w.tx)) : false;
-      const curIsZh = cur.c ? cur.c.some(w => isCJK(w.tx)) : false;
-      if (curIsEng) {
-        let paired = false;
-        let nextEngIdx = seq.length;
-        for (let k2 = i + 1; k2 < seq.length; k2++) {
-          const n = seq[k2];
-          const nIsEng = n.c ? (n.c.some(w => hasLatin(w.tx)) && !n.c.some(w => isCJK(w.tx))) : false;
-          if (nIsEng) { nextEngIdx = k2; break; }
-        }
-        for (let k = i + 1; k < nextEngIdx; k++) {
-          const cand = seq[k];
-          const candIsZh = cand.c ? cand.c.some(w => isCJK(w.tx)) : false;
-          if (candIsZh) { pairs.push({ origin: cur, trans: cand }); i = k; paired = true; break; }
-        }
-        if (!paired) pairs.push({ origin: cur, trans: null });
-      } else if (!curIsZh) {
-        pairs.push({ origin: cur, trans: null });
-      } else {
-        pairs.push({ origin: cur, trans: null });
+    // fallback: allow slight preceding translation
+    if (!trans) {
+      for (let j = 0; j < rest.length; j++) {
+        const cand = rest[j]; if (used.has(cand)) continue;
+        const tt = parseInt(cand.t || 0, 10) || 0;
+        const dt = t0 - tt;
+        if (dt < 0 || dt > backMs) continue;
+        if (textOf(cand) === textOf(origin)) continue;
+        if (Math.abs(dt) < bestDt) { trans = cand; bestDt = Math.abs(dt); }
       }
     }
-    pairs.sort((a,b) => (parseInt(a.origin.t||0,10)||0) - (parseInt(b.origin.t||0,10)||0));
-    pairs.forEach(p => {
-      const c = document.createElement('div');
-      c.className = 'line';
-      const t0 = parseInt(p.origin.t || '0', 10) || 0;
-      let dmax = parseInt(p.origin.d || '0', 10) || 0;
-      if (p.trans) dmax = Math.max(dmax, parseInt(p.trans.d || '0', 10) || 0);
-      c.dataset.t = String(t0);
-      c.dataset.d = String(dmax);
-      const r1 = makeRow(p.origin, 'origin');
-      c.appendChild(r1);
-      if (p.trans) { const r2 = makeRow(p.trans, 'trans'); r2.style.marginTop = '6px'; c.appendChild(r2); } else { c.classList.add('single'); }
-      c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch { } };
-      el.appendChild(c);
-    });
-    let userScrollTs = 0; let touchStartY = 0;
-    el.addEventListener('wheel', () => { userScrollTs = Date.now(); });
+    if (trans) used.add(trans);
+    const c = document.createElement('div');
+    c.className = 'line';
+    const ot = t0;
+    let dmax = parseInt(origin.d || '0', 10) || 0;
+    if (trans) dmax = Math.max(dmax, parseInt(trans.d || '0', 10) || 0);
+    c.dataset.t = String(ot);
+    c.dataset.d = String(dmax);
+    const r1 = makeRow(origin, 'origin'); c.appendChild(r1);
+    if (trans) { const r2 = makeRow(trans, 'trans'); r2.style.marginTop = '6px'; c.appendChild(r2); } else { c.classList.add('single'); }
+    c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch { } };
+    el.appendChild(c);
+  }
+  // leftover non-timed lines as singles to avoid losing content
+  for (const l of rest) {
+    if (used.has(l)) continue;
+    const c = document.createElement('div');
+    c.className = 'line single';
+    const t0 = parseInt(l.t || 0, 10) || 0;
+    const dmax = parseInt(l.d || '0', 10) || 0;
+    c.dataset.t = String(t0);
+    c.dataset.d = String(dmax);
+    const r1 = makeRow(l, 'origin'); c.appendChild(r1);
+    c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch { } };
+    el.appendChild(c);
+  }
+  let userScrollTs = 0; let touchStartY = 0;
+  el.addEventListener('wheel', () => { userScrollTs = Date.now(); });
     el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } });
     el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } });
     function update() {
@@ -467,6 +545,27 @@ window.addEventListener('DOMContentLoaded', () => {
       if (!data || !listEl || !Array.isArray(data.items)) return;
       listEl.innerHTML = '';
       const fmt = (s) => { const n = Math.floor(Number(s) || 0); const m = Math.floor(n / 60); const r = n % 60; return `${m}:${String(r).padStart(2, '0')}`; };
+      try {
+        if (!listEl.dataset.captureBound) {
+          listEl.addEventListener('mousedown', (e) => {
+            const row = e.target && e.target.closest ? e.target.closest('.item') : null;
+            if (row) { try { e.stopImmediatePropagation(); } catch {} }
+          }, true);
+          listEl.dataset.captureBound = '1';
+        }
+        if (!listEl.dataset.ctxBound) {
+          listEl.addEventListener('contextmenu', async (e) => {
+            const row = e.target && e.target.closest ? e.target.closest('.item') : null;
+            if (!row) return;
+            e.preventDefault();
+            const idx = Array.prototype.indexOf.call(listEl.children, row);
+            if (idx >= 0) {
+              try { await window.lowbarAPI.pluginCall('radio.music', 'removeIndex', [idx]); } catch {}
+            }
+          });
+          listEl.dataset.ctxBound = '1';
+        }
+      } catch {}
       data.items.forEach((it, idx) => { const row = document.createElement('div'); row.className = 'item'; const name = document.createElement('div'); name.textContent = `${it.title || ''}`; const dur = document.createElement('div'); dur.textContent = fmt(it.duration || 0); row.appendChild(name); row.appendChild(dur); if (idx === data.currentIndex) row.classList.add('active'); row.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'playIndex', [idx]); } catch { } }; let pressTimer = null; row.addEventListener('mousedown', () => { pressTimer = setTimeout(async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'removeIndex', [idx]); } catch { } }, 600); }); row.addEventListener('mouseup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); row.addEventListener('mouseleave', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); listEl.appendChild(row); }); try { const tt = document.getElementById('playlistTotalText'); if (tt) tt.textContent = `总时长：${fmt(data.totalSecs || 0)}`; } catch { } try { const finEl = document.getElementById('playlistFinish'); if (finEl) { const startIdx = Math.max(0, data.currentIndex || 0); const remainList = Array.isArray(data.items) ? data.items.slice(startIdx) : []; const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const dt = new Date(Date.now() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } } catch { } if (empty) empty.style.display = (data.items.length === 0) ? 'flex' : 'none'; if (!musicUrl && data.items.length > 0) { const last = data.items[data.items.length - 1]; try { if (last) { document.getElementById('audioCover').src = last.cover || ''; document.getElementById('audioTitle').textContent = last.title || ''; document.getElementById('audioArtist').textContent = last.artist || ''; } } catch { } }
     } catch { }
   }
@@ -474,7 +573,7 @@ window.addEventListener('DOMContentLoaded', () => {
   async function updateFinishEstimate() { try { const finEl = document.getElementById('playlistFinish'); if (!finEl) return; if (Date.now() - lastFinishUpdateTs < 3000) return; lastFinishUpdateTs = Date.now(); const r = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []); const data = r && r.result ? r.result : r; if (!data || !Array.isArray(data.items)) return; const startIdx = Math.max(0, data.currentIndex || 0); const remainList = data.items.slice(startIdx); const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const base = await getSystemNow(); const dt = new Date(base.getTime() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } catch { } }
   try { audio.addEventListener('timeupdate', updateFinishEstimate); } catch { }
   loadPlaylist();
-  try { const ch = new URL(location.href).searchParams.get('channel'); if (ch) { window.lowbarAPI.subscribe?.(ch); window.lowbarAPI.onEvent?.((name, payload) => { if (name === ch && payload && payload.type === 'update') { if (payload.target === 'playlist') { loadPlaylist(); try { applyBackgroundCurrent(); } catch {} (async () => { try { const r2 = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []); const d2 = r2 && r2.result ? r2.result : r2; if (d2 && Array.isArray(d2.items) && d2.currentIndex >= 0) { const cur = d2.items[d2.currentIndex]; const le = document.getElementById('lyrics'); if (cur && cur.id && cur.source === 'kuwo') { await renderLyricsForKuwo(cur.id); } else { if (le) le.textContent = ''; } } } catch { } })(); } else if (payload.target === 'songLoading') { try { const x = document.getElementById('songLoading'); if (x) x.style.display = (payload.value === 'show') ? 'flex' : 'none'; } catch { } } else if (payload.target === 'bgModePanel') { try { if (!bgModePanel) return; const v = String(payload.value||''); if (v === 'toggle') { const cur = bgModePanel.style.display; bgModePanel.style.display = (!cur || cur==='none') ? 'flex' : 'none'; } else if (v === 'show') bgModePanel.style.display = 'flex'; else if (v === 'hide') bgModePanel.style.display = 'none'; } catch {} } } }); } } catch { }
+  try { const ch = new URL(location.href).searchParams.get('channel'); if (ch) { window.lowbarAPI.subscribe?.(ch); window.lowbarAPI.onEvent?.((name, payload) => { if (name === ch && payload && payload.type === 'update') { if (payload.target === 'playlist') { loadPlaylist(); try { applyBackgroundCurrent(); } catch {} (async () => { try { const r2 = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []); const d2 = r2 && r2.result ? r2.result : r2; if (d2 && Array.isArray(d2.items) && d2.currentIndex >= 0) { const cur = d2.items[d2.currentIndex]; const le = document.getElementById('lyrics'); if (cur && cur.id && cur.source === 'kuwo') { await renderLyricsForKuwo(cur.id); } else { if (le) le.textContent = ''; } } } catch { } })(); } else if (payload.target === 'songLoading') { try { const x = document.getElementById('songLoading'); if (x) x.style.display = (payload.value === 'show') ? 'flex' : 'none'; } catch { } } else if (payload.target === 'bgModePanel') { try { if (!bgModePanel) return; const v = String(payload.value||''); if (v === 'toggle') { const cur = bgModePanel.style.display; bgModePanel.style.display = (!cur || cur==='none') ? 'flex' : 'none'; } else if (v === 'show') bgModePanel.style.display = 'flex'; else if (v === 'hide') bgModePanel.style.display = 'none'; } catch {} } else if (payload.target === 'bgModeApply') { try { applyBackgroundCurrent(); spectrumEnabled = (String(localStorage.getItem('radio.spectrum.enabled')||'1') !== '0'); if (spectrumCanvas) { spectrumCanvas.style.display = spectrumEnabled ? '' : 'none'; try { spectrumCanvas.width = spectrumCanvas.clientWidth; spectrumCanvas.height = spectrumCanvas.clientHeight; } catch {} } updateFullscreenStyles(); } catch {} } } }); } } catch { }
   try { const toggle = document.getElementById('removeAfterPlay'); async function initToggle() { try { const r = await window.lowbarAPI.pluginCall('radio.music', 'getSettings', []); const d = r && r.result ? r.result : r; const cur = !!(d && d.settings && d.settings.removeAfterPlay); if (toggle) toggle.checked = cur; } catch { } } function persistLocal() { try { if (toggle) localStorage.setItem('radio.removeAfterPlay', toggle.checked ? '1' : '0'); } catch { } } if (toggle) { initToggle(); toggle.addEventListener('change', async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'setRemoveAfterPlay', [toggle.checked]); persistLocal(); } catch { } }); } } catch { }
   try { const addBtn = document.getElementById('playlistAddBtn'); if (addBtn) addBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'onLowbarEvent', [{ type: 'click', id: 'tab-search' }]); } catch { } }; } catch { }
   const prevBtn = document.getElementById('audioPrevBtn');
@@ -485,7 +584,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (playBtn) { playBtn.onclick = () => { try { if (audio.paused) { audio.play(); playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; } else { audio.pause(); playBtn.innerHTML = '<i class="ri-play-fill"></i>'; } } catch { } }; audio.addEventListener('play', () => { playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; }); audio.addEventListener('pause', () => { playBtn.innerHTML = '<i class="ri-play-fill"></i>'; }); }
   try { audio.addEventListener('play', updateFullscreenStyles); } catch { }
 });
-function updateFullscreenStyles() { try { const fsMatch = (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches); const fs = !!document.fullscreenElement || fsMatch || (window.innerHeight >= (screen.availHeight - 1)); const bar = document.getElementById('audioBar'); if (bar) bar.style.bottom = fs ? '96px' : '16px'; const content = document.querySelector('.content-area'); if (bar && content) { const rect = bar.getBoundingClientRect(); const barH = Math.max(64, Math.floor(rect.height || 64)); const barBottomPx = parseInt(String(bar.style.bottom || '16').replace('px', ''), 10) || 16; const padding = 16; const offset = barBottomPx + barH + padding; content.style.bottom = `${offset}px`; } } catch { } }
+function updateFullscreenStyles() { try { const fsMatch = (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches); const fs = !!document.fullscreenElement || fsMatch || (window.innerHeight >= (screen.availHeight - 1)); const bar = document.getElementById('audioBar'); if (bar) bar.style.bottom = fs ? '96px' : '16px'; const content = document.querySelector('.content-area'); const spectrumWrap = document.querySelector('.audio-spectrum'); if (bar && content) { const rect = bar.getBoundingClientRect(); const barH = Math.max(64, Math.floor(rect.height || 64)); const barBottomPx = parseInt(String(bar.style.bottom || '16').replace('px', ''), 10) || 16; const padding = 16; let specH = 40; try { const sr = spectrumWrap ? spectrumWrap.getBoundingClientRect() : null; if (sr) specH = Math.max(24, Math.floor(sr.height || 40)); } catch {} if (spectrumWrap) spectrumWrap.style.bottom = `${barBottomPx + barH + 8}px`; const offset = barBottomPx + barH + 8 + specH + padding; content.style.bottom = `${offset}px`; } } catch { } }
 updateFullscreenStyles();
 window.addEventListener('resize', updateFullscreenStyles);
 document.addEventListener('fullscreenchange', updateFullscreenStyles);

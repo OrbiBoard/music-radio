@@ -9,7 +9,8 @@ const state = {
     search: '',
     settings: '',
     about: '',
-    player: ''
+    player: '',
+    bgSettings: ''
   },
   currentFloatingUrl: null,
   playlist: [],
@@ -25,6 +26,7 @@ const functions = {
       const searchFile = path.join(__dirname, 'float', 'search.html');
       const settingsFile = path.join(__dirname, 'float', 'settings.html');
       const playerFile = path.join(__dirname, 'float', 'player.html');
+      const bgSettingsFile = path.join(__dirname, 'float', 'bg-settings.html');
       const aboutFile = path.join(__dirname, 'float', 'about.html');
 
       const params = {
@@ -55,6 +57,7 @@ const functions = {
       state.pages.search = url.pathToFileURL(searchFile).href;
       state.pages.settings = url.pathToFileURL(settingsFile).href;
       state.pages.player = url.pathToFileURL(playerFile).href;
+      state.pages.bgSettings = url.pathToFileURL(bgSettingsFile).href;
       state.pages.about = url.pathToFileURL(aboutFile).href;
 
       await pluginApi.call('ui.lowbar', 'openTemplate', [params]);
@@ -700,6 +703,9 @@ const functions = {
   onLowbarEvent: async (payload = {}) => {
     try {
       if (!payload || typeof payload !== 'object') return true;
+      if (payload.type === 'update' && payload.target === 'bgModeApply') {
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'bgModeApply', value: 'apply' }); } catch {}
+      }
       if (payload.type === 'update' && payload.target === 'floatingUrl') {
         state.currentFloatingUrl = payload.value || null;
       }
@@ -725,7 +731,10 @@ const functions = {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.about });
           state.currentFloatingUrl = state.pages.about;
         } else if (payload.id === 'btn-bgmode') {
-          try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'bgModePanel', value: 'toggle' }); } catch {}
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 560, height: 420 } });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.bgSettings });
+          state.currentFloatingUrl = state.pages.bgSettings;
         }
       }
       return true;

@@ -10,7 +10,8 @@ const state = {
     settings: '',
     about: '',
     player: '',
-    bgSettings: ''
+    bgSettings: '',
+    debugLyrics: ''
   },
   currentFloatingUrl: null,
   playlist: [],
@@ -27,6 +28,7 @@ const functions = {
       const settingsFile = path.join(__dirname, 'float', 'settings.html');
       const playerFile = path.join(__dirname, 'float', 'player.html');
       const bgSettingsFile = path.join(__dirname, 'float', 'bg-settings.html');
+      const debugLyricsFile = path.join(__dirname, 'float', 'debug-lyrics.html');
       const aboutFile = path.join(__dirname, 'float', 'about.html');
 
       const params = {
@@ -42,12 +44,12 @@ const functions = {
         floatingHeight: 520,
         centerItems: [
           // { id: 'tab-recommend', text: '推荐', icon: 'ri-thumb-up-line' },
-          { id: 'tab-search', text: '搜索', icon: 'ri-search-line' },
-          { id: 'btn-bgmode', text: '背景', icon: 'ri-contrast-drop-2-line' },
-          // { id: 'tab-settings', text: '设置', icon: 'ri-settings-3-line' },
+          { id: 'tab-search', text: '搜索', icon: 'ri-search-line' }
           // { id: 'tab-about', text: '关于', icon: 'ri-information-line' }
         ],
-        leftItems: [],
+        leftItems: [
+          { id: 'btn-settings', text: '设置', icon: 'ri-settings-3-line' }
+        ],
         backgroundUrl: url.pathToFileURL(bgFile).href,
         floatingUrl: null,
         floatingBounds: 'center'
@@ -58,6 +60,7 @@ const functions = {
       state.pages.settings = url.pathToFileURL(settingsFile).href;
       state.pages.player = url.pathToFileURL(playerFile).href;
       state.pages.bgSettings = url.pathToFileURL(bgSettingsFile).href;
+      state.pages.debugLyrics = url.pathToFileURL(debugLyricsFile).href;
       state.pages.about = url.pathToFileURL(aboutFile).href;
 
       await pluginApi.call('ui.lowbar', 'openTemplate', [params]);
@@ -706,10 +709,13 @@ const functions = {
       if (payload.type === 'update' && payload.target === 'bgModeApply') {
         try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'bgModeApply', value: 'apply' }); } catch {}
       }
+      if (payload.type === 'update' && payload.target === 'lyricsPairApply') {
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'lyricsPairApply', value: 'apply' }); } catch {}
+      }
       if (payload.type === 'update' && payload.target === 'floatingUrl') {
         state.currentFloatingUrl = payload.value || null;
       }
-      if (payload.type === 'click') {
+      if (payload.type === 'click' || payload.type === 'left.click') {
         if (payload.id === 'tab-recommend') {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 860, height: 520 } });
@@ -720,7 +726,7 @@ const functions = {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 860, height: 520 } });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.search });
           state.currentFloatingUrl = state.pages.search;
-        } else if (payload.id === 'tab-settings') {
+        } else if (payload.id === 'tab-settings' || payload.id === 'btn-settings') {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 720, height: 520 } });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.settings });
@@ -735,6 +741,11 @@ const functions = {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 560, height: 420 } });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.bgSettings });
           state.currentFloatingUrl = state.pages.bgSettings;
+        } else if (payload.id === 'btn-debug-lyrics') {
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 920, height: 640 } });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.debugLyrics });
+          state.currentFloatingUrl = state.pages.debugLyrics;
         }
       }
       return true;

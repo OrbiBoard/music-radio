@@ -42,6 +42,8 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!localStorage.getItem('radio.band.gain3')) localStorage.setItem('radio.band.gain3','1.25');
     if (!localStorage.getItem('radio.band.gain4')) localStorage.setItem('radio.band.gain4','1.5');
     if (!localStorage.getItem('radio.shine.audioReactive')) localStorage.setItem('radio.shine.audioReactive','1');
+    if (!localStorage.getItem('radio.lyric.pair.ms')) localStorage.setItem('radio.lyric.pair.ms','600');
+    if (!localStorage.getItem('radio.lyric.back.ms')) localStorage.setItem('radio.lyric.back.ms','300');
   } catch {}
   let audioCtx = null;
   let analyser = null;
@@ -394,7 +396,7 @@ window.addEventListener('DOMContentLoaded', () => {
       let text = '';
       try { text = new TextDecoder('gb18030', { fatal: false }).decode(arr); } catch { text = new TextDecoder('utf-8').decode(arr); }
       const yrc = lrcxToYrcArr(text);
-      mountYrc2_pair(yrc);
+      mountYrc2_stream(yrc);
     } catch { }
     finally { if (lyricsLoading) lyricsLoading.style.display = 'none'; }
   }
@@ -408,7 +410,7 @@ function mountYrc2_pair(yrc) {
   if (!el) return;
   el.innerHTML = '';
   const AUTO_SCROLL_PAUSE_MS = 4000;
-  const PAIR_MS = 600;
+  const PAIR_MS = Math.max(100, parseInt(localStorage.getItem('radio.lyric.pair.ms')||'600',10)||600);
   const sorted = Array.isArray(yrc) ? yrc.slice().sort((a, b) => (parseInt(a.t || 0, 10) || 0) - (parseInt(b.t || 0, 10) || 0)) : [];
   function makeRow(line, kind) {
     const row = document.createElement('div');
@@ -426,7 +428,7 @@ function mountYrc2_pair(yrc) {
   const used = new Set();
   const timed = sorted.filter(l => hasWordTiming(l));
   const rest = sorted.filter(l => !hasWordTiming(l));
-  const backMs = 300;
+  const backMs = Math.max(0, parseInt(localStorage.getItem('radio.lyric.back.ms')||'300',10)||300);
   const fwdMs = PAIR_MS;
   const assigned = new Map();
   const restAssigned = new Set();
@@ -494,6 +496,63 @@ function mountYrc2_pair(yrc) {
   }
   let userScrollTs = 0; let touchStartY = 0;
   el.addEventListener('wheel', () => { userScrollTs = Date.now(); });
+    el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } });
+    el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } });
+    function update() {
+      const t = audio.currentTime * 1000;
+      const lines = Array.from(el.querySelectorAll('.line'));
+      let active = null;
+      for (let i = 0; i < lines.length; i++) { const c = lines[i]; const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); if (t >= lt && t < lt + ld) { active = c; break; } }
+      lines.forEach((c) => {
+        const rows = c.querySelectorAll('.row');
+        const isActive = (c === active);
+        rows.forEach((row) => {
+          const isTrans = row.classList.contains('trans');
+          row.style.opacity = isActive ? (isTrans ? '0.85' : '1') : (isTrans ? '0.6' : '0.7');
+          const spans = row.querySelectorAll('span');
+          spans.forEach((s) => {
+            const st = parseInt(s.dataset.t || '0', 10);
+            const sd = parseInt(s.dataset.d || '0', 10);
+            const se = st + sd;
+            if (isActive && t >= st) s.style.opacity = '1'; else s.style.opacity = '0.5';
+          });
+        });
+      });
+      if (active) { const now = Date.now(); if (now - userScrollTs > AUTO_SCROLL_PAUSE_MS) { const rect = active.getBoundingClientRect(); const viewMid = window.innerHeight * 0.42; const dy = rect.top + (rect.height / 2) - viewMid; try { el.scrollTo({ top: el.scrollTop + dy, behavior: 'smooth' }); } catch { el.scrollTop += dy; } } }
+    }
+    audio.addEventListener('timeupdate', update);
+  }
+  function mountYrc2_stream(yrc) {
+    const el = document.getElementById('lyrics');
+    if (!el) return;
+    el.innerHTML = '';
+    const AUTO_SCROLL_PAUSE_MS = 4000;
+    const seq = Array.isArray(yrc) ? yrc.slice() : [];
+    function makeRow(line, kind) {
+      const row = document.createElement('div');
+      row.className = 'row ' + kind;
+      row.style.whiteSpace = 'normal';
+      row.style.opacity = '0.9';
+      line.c.forEach((w, i) => { const s = document.createElement('span'); s.textContent = w.tx; s.dataset.t = w.t; s.dataset.d = w.d; s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; s.style.opacity = '0.55'; s.style.display = 'inline'; row.appendChild(s); const next = line.c[i + 1]; if (next && needSpace(w.tx, next.tx)) row.appendChild(document.createTextNode(' ')); });
+      return row;
+    }
+    const hasWordTiming = (line) => Array.isArray(line?.c) && line.c.some(w => (parseInt(w.d||0,10)||0) > 0);
+    const anyTimed = seq.some(l => hasWordTiming(l));
+    seq.forEach(line => {
+      const c = document.createElement('div');
+      c.className = 'line';
+      const lt = parseInt(line.t || 0, 10) || 0;
+      const ld = parseInt(line.d || 0, 10) || 0;
+      c.dataset.t = String(lt);
+      c.dataset.d = String(ld);
+      const kind = (anyTimed && !hasWordTiming(line)) ? 'trans' : 'origin';
+      const r = makeRow(line, kind);
+      c.appendChild(r);
+      c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch { } };
+      el.appendChild(c);
+    });
+    let userScrollTs = 0; let touchStartY = 0;
+    el.addEventListener('wheel', () => { userScrollTs = Date.now(); });
     el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } });
     el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } });
     function update() {

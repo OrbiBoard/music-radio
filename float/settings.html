@@ -16,7 +16,15 @@
 </head>
 <body>
   <div class="wrap">
-    <header>AMLL 集成与性能</header>
+    <header>
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div style="font-weight:600;">设置</div>
+        <div style="display:flex; gap:8px;">
+          <button id="openBg" title="背景设置" style="border:0; background:#2a2a2a; color:#eee; padding:6px 10px; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px;"><i class="ri-contrast-drop-2-line"></i> 背景</button>
+          <button id="openDebug" title="调试歌词" style="border:0; background:#2a2a2a; color:#eee; padding:6px 10px; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px;"><i class="ri-bug-line"></i> 调试</button>
+        </div>
+      </div>
+    </header>
     <div class="content">
       背景层使用 AMLL DOM 歌词播放器。完整集成可参考官方文档与指南：
       <div><a href="https://github.com/Steve-xmh/applemusic-like-lyrics" target="_blank" rel="noopener">AMLL 仓库</a></div>
@@ -28,5 +36,17 @@
       </ul>
     </div>
   </div>
+  <script>
+    (function(){
+      const openBg = document.getElementById('openBg');
+      const openDebug = document.getElementById('openDebug');
+      if (openBg) openBg.addEventListener('click', () => {
+        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'click', id:'btn-bgmode' }]); } catch {}
+      });
+      if (openDebug) openDebug.addEventListener('click', () => {
+        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'click', id:'btn-debug-lyrics' }]); } catch {}
+      });
+    })();
+  </script>
 </body>
 </html>

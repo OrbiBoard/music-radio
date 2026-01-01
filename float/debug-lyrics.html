@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>调试歌词</title>
+  <link rel="stylesheet" href="../../../renderer/remixicon-local.css" />
+  <style>
+    html, body { height: 100%; margin: 0; background: #181818; color: #e6e6e6; font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; }
+    .wrap { height: 100%; display: grid; grid-template-rows: auto 1fr; }
+    header { padding: 10px 14px; border-bottom: 1px solid #2a2a2a; display:flex; align-items:center; gap:16px; }
+    header .group { display:flex; align-items:center; gap:10px; }
+    header label { font-size:13px; color:#cfcfcf; }
+    header input { width: 100px; }
+    header button { border:0; background:#2a2a2a; color:#eee; padding:6px 10px; border-radius:8px; cursor:pointer; }
+    header button:hover { background:#333; }
+    .content { padding: 12px; overflow:auto; }
+    .grid { display:grid; grid-template-columns: 160px 100px auto; gap:8px; font-size:13px; color:#cfcfcf; }
+    .grid .head { color:#9cd2ff; }
+    .row { display:contents; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="group">
+        <label for="pairMs">配对窗口(ms)</label>
+        <input id="pairMs" type="number" min="100" max="2000" step="50" />
+      </div>
+      <div class="group">
+        <label for="backMs">前置容差(ms)</label>
+        <input id="backMs" type="number" min="0" max="1000" step="50" />
+      </div>
+      <div class="group">
+        <button id="applyBtn"><i class="ri-check-line"></i> 应用到背景</button>
+        <button id="previewBtn"><i class="ri-eye-line"></i> 预览当前曲目</button>
+      </div>
+      <div class="mono" id="status"></div>
+    </header>
+    <div class="content">
+      <div class="grid mono" id="grid">
+        <div class="head">时间(ms)</div><div class="head">类型</div><div class="head">文本</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function(){
+      const pairMsEl = document.getElementById('pairMs');
+      const backMsEl = document.getElementById('backMs');
+      const applyBtn = document.getElementById('applyBtn');
+      const previewBtn = document.getElementById('previewBtn');
+      const grid = document.getElementById('grid');
+      const status = document.getElementById('status');
+      function read(k, def){ try { const v = localStorage.getItem(k); return v===null||v===undefined ? def : v; } catch { return def; } }
+      function write(k, v){ try { localStorage.setItem(k, String(v)); } catch {} }
+      function ts(x){ return (parseInt(x||0,10)||0); }
+      function lrcxToYrcArr(krc) {
+        const lines = String(krc || '').split('\n').filter(l => l.trim());
+        const yrc = []; let w = 0;
+        for (const line of lines) {
+          const m = line.match(/^\[(\d+):(\d+)\.(\d+)\](.*)/);
+          if (!m) { const mk = line.match(/^\[kuwo:(\d+)\]/); if (mk) { w = parseInt(mk[1], 8) || 0; } continue; }
+          const minutes = parseInt(m[1], 10), seconds = parseInt(m[2], 10), ms = parseInt(String(m[3]).padEnd(3, '0'), 10);
+          const ts0 = minutes * 60000 + seconds * 1000 + ms;
+          const content = m[4];
+          const words = []; const re = /<(\d+),(-?\d+)>([^<]*)/g; let mm;
+          const k1 = Math.floor(w / 10), k2 = w % 10;
+          while ((mm = re.exec(content))) {
+            const v1 = parseInt(mm[1], 10), v2 = parseInt(mm[2], 10);
+            const start = (v1 + v2) / (k1 * 2);
+            const dur = (v1 - v2) / (k2 * 2);
+            words.push({ t: ts0 + start, d: dur, tx: mm[3] });
+          }
+          let ld = 0; if (words.length) { const last = words[words.length - 1]; ld = last.t + last.d - ts0; }
+          yrc.push({ t: ts0, d: ld, c: words });
+        }
+        return yrc;
+      }
+      function hasWordTiming(line){ return Array.isArray(line?.c) && line.c.some(w => (parseInt(w.d||0,10)||0)>0); }
+      function textOf(line){ return Array.isArray(line?.c) ? line.c.map(w=>String(w.tx||'')).join('') : ''; }
+      function renderTable(yrc){
+        grid.innerHTML = '<div class="head">时间(ms)</div><div class="head">类型</div><div class="head">文本</div>';
+        const sorted = yrc.slice().sort((a,b)=>ts(a.t)-ts(b.t));
+        const timed = sorted.filter(l=>hasWordTiming(l));
+        const rest = sorted.filter(l=>!hasWordTiming(l));
+        const pm = Math.max(100, parseInt(pairMsEl.value||'600',10)||600);
+        const bm = Math.max(0, parseInt(backMsEl.value||'300',10)||300);
+        const assigned = new Map(); const restAssigned = new Set();
+        for (let k=0;k<timed.length;k++){
+          const origin = timed[k]; const t0 = ts(origin.t);
+          const tNext = (k+1<timed.length) ? ts(timed[k+1].t) : Infinity;
+          const winStart = t0, winEnd = Math.min(t0+pm, tNext-1);
+          let best=null, bestDt=1e9;
+          for (const r of rest){ if (restAssigned.has(r)) continue; const tr=ts(r.t); if (textOf(r)===textOf(origin)) continue; if (tr>=winStart && tr<=winEnd){ const dt=tr-t0; if (dt>=0 && dt<=pm && dt<bestDt){ best=r; bestDt=dt; } } }
+          if (!best){ const backStart=t0-bm; for (const r of rest){ if (restAssigned.has(r)) continue; const tr=ts(r.t); if (textOf(r)===textOf(origin)) continue; if (tr>=backStart && tr<t0){ const dt=t0-tr; if (dt<=bm && dt<bestDt){ best=r; bestDt=dt; } } } }
+          if (best){ assigned.set(k,best); restAssigned.add(best); }
+        }
+        for (let k=0;k<timed.length;k++){
+          const o=timed[k]; const t=ts(o.t); const txt=textOf(o);
+          grid.insertAdjacentHTML('beforeend', `<div>${t}</div><div>主行</div><div>${txt}</div>`);
+          const tr=assigned.get(k);
+          if (tr){ grid.insertAdjacentHTML('beforeend', `<div>${ts(tr.t)}</div><div>翻译</div><div>${textOf(tr)}</div>`); }
+        }
+        for (const r of rest){ if (restAssigned.has(r)) continue; grid.insertAdjacentHTML('beforeend', `<div>${ts(r.t)}</div><div>单行</div><div>${textOf(r)}</div>`); }
+      }
+      async function preview(){
+        status.textContent = '加载中...';
+        try {
+          const rr = await window.lowbarAPI.pluginCall('radio.music','getPlaylist',[]);
+          const d = rr && rr.result ? rr.result : rr;
+          if (!d || !Array.isArray(d.items) || d.currentIndex<0){ status.textContent='无当前曲目'; return; }
+          const cur = d.items[d.currentIndex];
+          if (!cur || cur.source!=='kuwo' || !cur.id){ status.textContent='当前曲目非酷我源或缺少ID'; return; }
+          const r = await window.lowbarAPI.pluginCall('radio.music','fetchKuwoLyrics',[cur.id,true]);
+          const data = r && r.result ? r.result : r;
+          if (!data || !data.ok || !data.dataBase64){ status.textContent='歌词获取失败'; return; }
+          const bin = atob(String(data.dataBase64||'')); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+          let text=''; try { text = new TextDecoder('gb18030',{fatal:false}).decode(arr); } catch { text = new TextDecoder('utf-8').decode(arr); }
+          const yrc = lrcxToYrcArr(text);
+          renderTable(yrc);
+          status.textContent = `主行 ${yrc.filter(hasWordTiming).length} / 总行 ${yrc.length}`;
+        } catch (e) {
+          status.textContent = '错误：'+(e?.message||String(e));
+        }
+      }
+      function apply(){
+        write('radio.lyric.pair.ms', pairMsEl.value||'600');
+        write('radio.lyric.back.ms', backMsEl.value||'300');
+        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'update', target:'lyricsPairApply', value:'apply' }]); } catch {}
+        status.textContent = '已应用到背景';
+      }
+      function init(){
+        pairMsEl.value = read('radio.lyric.pair.ms','600');
+        backMsEl.value = read('radio.lyric.back.ms','300');
+      }
+      init();
+      previewBtn.addEventListener('click', preview);
+      applyBtn.addEventListener('click', apply);
+    })();
+  </script>
+</body>
+</html>

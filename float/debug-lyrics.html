@@ -52,8 +52,8 @@
       const previewBtn = document.getElementById('previewBtn');
       const grid = document.getElementById('grid');
       const status = document.getElementById('status');
-      function read(k, def){ try { const v = localStorage.getItem(k); return v===null||v===undefined ? def : v; } catch { return def; } }
-      function write(k, v){ try { localStorage.setItem(k, String(v)); } catch {} }
+      function read(k, def){ try { const v = localStorage.getItem(k); return v===null||v===undefined ? def : v; } catch (e) { return def; } }
+      function write(k, v){ try { localStorage.setItem(k, String(v)); } catch (e) {} }
       function ts(x){ return (parseInt(x||0,10)||0); }
       function lrcxToYrcArr(krc) {
         const lines = String(krc || '').split('\n').filter(l => l.trim());
@@ -116,7 +116,7 @@
           const data = r && r.result ? r.result : r;
           if (!data || !data.ok || !data.dataBase64){ status.textContent='歌词获取失败'; return; }
           const bin = atob(String(data.dataBase64||'')); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
-          let text=''; try { text = new TextDecoder('gb18030',{fatal:false}).decode(arr); } catch { text = new TextDecoder('utf-8').decode(arr); }
+          let text=''; try { text = new TextDecoder('gb18030',{fatal:false}).decode(arr); } catch (e) { text = new TextDecoder('utf-8').decode(arr); }
           const yrc = lrcxToYrcArr(text);
           renderTable(yrc);
           status.textContent = `主行 ${yrc.filter(hasWordTiming).length} / 总行 ${yrc.length}`;
@@ -127,7 +127,7 @@
       function apply(){
         write('radio.lyric.pair.ms', pairMsEl.value||'600');
         write('radio.lyric.back.ms', backMsEl.value||'300');
-        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'update', target:'lyricsPairApply', value:'apply' }]); } catch {}
+        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'update', target:'lyricsPairApply', value:'apply' }]); } catch (e) {}
         status.textContent = '已应用到背景';
       }
       function init(){

@@ -41,10 +41,10 @@
       const openBg = document.getElementById('openBg');
       const openDebug = document.getElementById('openDebug');
       if (openBg) openBg.addEventListener('click', () => {
-        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'click', id:'btn-bgmode' }]); } catch {}
+        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'click', id:'btn-bgmode' }]); } catch (e) {}
       });
       if (openDebug) openDebug.addEventListener('click', () => {
-        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'click', id:'btn-debug-lyrics' }]); } catch {}
+        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'click', id:'btn-debug-lyrics' }]); } catch (e) {}
       });
     })();
   </script>

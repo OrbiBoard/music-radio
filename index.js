@@ -73,7 +73,7 @@ const functions = {
             await functions.setBackgroundMusic({ music: g.url, album: cur.cover, title: cur.title, artist: cur.artist, id: cur.id, source: cur.source || 'kuwo' });
           }
         }
-      } catch {}
+      } catch (e) {}
       return true;
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
@@ -160,7 +160,7 @@ const functions = {
           if (s >= 0 && e > s) txt = txt.slice(s, e+1);
         }
         let obj = null;
-        try { obj = JSON.parse(txt); } catch {}
+        try { obj = JSON.parse(txt); } catch (e) {}
         return { obj, raw: rawTxt };
       }
       let dat = await fetchJson(buildUrl(page));
@@ -211,7 +211,7 @@ const functions = {
           const duration = Number(m.duration || 0) || 0;
           const cover = m.pic ? (String(m.pic).startsWith('http') ? m.pic : ('https:' + String(m.pic))) : '';
           items.push({ id: bvid, title, artist, album, duration, cover, source: 'bili', cid: 'default' });
-        } catch {}
+        } catch (e) {}
       }
       const hasMore = arr.length > (Math.max(1, Number(page)||1) * pageSize);
       return { ok: true, items, hasMore };
@@ -248,11 +248,11 @@ const functions = {
       const url0 = durl[0] && durl[0].url ? durl[0].url : null;
       if (!url0) return { ok: false, error: 'resolve failed' };
       const tempDir = require('path').join(os.tmpdir(), 'orbiboard.radio.bilibili', 'cache');
-      try { if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true }); } catch {}
+      try { if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true }); } catch (e) {}
       const fileName = `${String(bvid)}-${String(c)}.mp4`;
       const cachePath = require('path').join(tempDir, fileName);
       if (fs.existsSync(cachePath)) return { ok: true, url: require('url').pathToFileURL(cachePath).href };
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch {}
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       async function headSize(u){ return await new Promise((resolve, reject) => { https.get(u, { method: 'HEAD', headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36', 'Accept-Encoding': 'gzip', 'Origin': 'https://www.bilibili.com', 'Referer': `https://www.bilibili.com/${String(bvid)}` } }, (res) => { const len = parseInt(res.headers['content-length']||'0', 10) || 0; resolve(len); }).on('error', reject); }); }
       async function fetchRange(u, start, end){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36', 'Accept-Encoding': 'gzip', 'Origin': 'https://www.bilibili.com', 'Referer': `https://www.bilibili.com/${String(bvid)}`, 'Range': `bytes=${start}-${end}` } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>resolve(Buffer.concat(chunks))); }).on('error', reject); }); }
       const size = await headSize(url0);
@@ -269,13 +269,13 @@ const functions = {
         const maxTemp = 50;
         if (files.length > maxTemp) {
           const oldest = files.sort((a,b)=>fs.statSync(require('path').join(tempDir,a)).mtime - fs.statSync(require('path').join(tempDir,b)).mtime)[0];
-          try { fs.unlinkSync(require('path').join(tempDir, oldest)); } catch {}
+          try { fs.unlinkSync(require('path').join(tempDir, oldest)); } catch (e) {}
         }
-      } catch {}
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch {}
+      } catch (e) {}
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: true, url: require('url').pathToFileURL(cachePath).href };
     } catch (e) {
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch {}
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: false, error: e?.message || String(e) };
     }
   },
@@ -510,7 +510,7 @@ const functions = {
         return out.slice(0, k).toString('base64');
       }
       async function inflateAsync(buf){ return await new Promise((resolve, reject) => zlib.inflate(buf, (e, r) => e ? reject(e) : resolve(r))); }
-      function requestRaw(u){ return new Promise((resolve, reject) => { const lib = u.startsWith('https') ? https : http; const req = lib.get(u, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>resolve(Buffer.concat(chunks))); }).on('error', reject); req.setTimeout(15000, () => { try{req.destroy(new Error('timeout'));}catch{} }); }); }
+      function requestRaw(u){ return new Promise((resolve, reject) => { const lib = u.startsWith('https') ? https : http; const req = lib.get(u, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>resolve(Buffer.concat(chunks))); }).on('error', reject); req.setTimeout(15000, () => { try{req.destroy(new Error('timeout'));}catch (e) {} }); }); }
       const api = `http://newlyric.kuwo.cn/newlyric.lrc?${buildParams(id, !!isLyricx)}`;
       const raw = await requestRaw(api);
       const head = raw.toString('utf8', 0, 12);
@@ -603,10 +603,10 @@ const functions = {
             const fallback = ['dist/esm/index.js','dist/index.js','index.js'];
             for (const rel of [...candidates, ...fallback]) {
               const full = path.join(pkgDir, rel);
-              try { if (fs.existsSync(full)) return { file: full, pkgDir, style: path.join(pkgDir, 'style.css') }; } catch {}
+              try { if (fs.existsSync(full)) return { file: full, pkgDir, style: path.join(pkgDir, 'style.css') }; } catch (e) {}
             }
             return { file: null, pkgDir, style: path.join(pkgDir, 'style.css') };
-          } catch {}
+          } catch (e) {}
         }
         return { file: null, pkgDir: null, style: null };
       }
@@ -616,14 +616,14 @@ const functions = {
           const pkgDir = path.dirname(pkgJsonPath);
           const full = path.join(pkgDir, rel || 'dist/esm/index.js');
           if (fs.existsSync(full)) return toUrl(full);
-        } catch {}
+        } catch (e) {}
         const info = resolveFromPaths(pkgName);
         if (info && info.file && /\/dist\/esm\//.test(info.file)) return toUrl(info.file);
         return null;
       }
       function resolveEntry(pkgName) {
         let pkgJsonPath = null;
-        try { pkgJsonPath = require.resolve(path.join(pkgName, 'package.json')); } catch {}
+        try { pkgJsonPath = require.resolve(path.join(pkgName, 'package.json')); } catch (e) {}
         if (!pkgJsonPath) {
           const info = resolveFromPaths(pkgName);
           if (!info || !info.pkgDir) return info;
@@ -648,10 +648,10 @@ const functions = {
           const fallback = ['dist/esm/index.js','dist/index.js','index.js'];
           for (const rel of [...candidates, ...fallback]) {
             const full = path.join(pkgDir, rel);
-            try { if (fs.existsSync(full)) return { file: full, pkgDir, style: path.join(pkgDir, 'style.css') }; } catch {}
+            try { if (fs.existsSync(full)) return { file: full, pkgDir, style: path.join(pkgDir, 'style.css') }; } catch (e) {}
           }
           return { file: null, pkgDir, style: path.join(pkgDir, 'style.css') };
-        } catch {
+        } catch (e) {
           return { file: null, pkgDir: null, style: null };
         }
       }
@@ -679,7 +679,7 @@ const functions = {
           addFrom(meta.dependencies);
           addFrom(meta.peerDependencies);
           return Array.from(set);
-        } catch {
+        } catch (e) {
           return pixiPackages;
         }
       }
@@ -707,10 +707,10 @@ const functions = {
     try {
       if (!payload || typeof payload !== 'object') return true;
       if (payload.type === 'update' && payload.target === 'bgModeApply') {
-        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'bgModeApply', value: 'apply' }); } catch {}
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'bgModeApply', value: 'apply' }); } catch (e) {}
       }
       if (payload.type === 'update' && payload.target === 'lyricsPairApply') {
-        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'lyricsPairApply', value: 'apply' }); } catch {}
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'lyricsPairApply', value: 'apply' }); } catch (e) {}
       }
       if (payload.type === 'update' && payload.target === 'floatingUrl') {
         state.currentFloatingUrl = payload.value || null;

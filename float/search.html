@@ -61,7 +61,7 @@
         const mTail = document.createElement('button'); mTail.innerHTML = '<i class="ri-play-list-2-line"></i> 插入到歌单尾部';
         const mPlay = document.createElement('button'); mPlay.innerHTML = '<i class="ri-play-fill"></i> 立即播放';
         const mNext = document.createElement('button'); mNext.innerHTML = '<i class="ri-skip-forward-fill"></i> 下一首播放';
-        function hideFloating(){ try { window.lowbarAPI.emitEvent('radio.music', { type:'update', target:'floatingUrl', value: null }); } catch {} }
+        function hideFloating(){ try { window.lowbarAPI.emitEvent('radio.music', { type:'update', target:'floatingUrl', value: null }); } catch (e) {} }
         mTail.onclick = async (e) => { e.stopPropagation(); await window.lowbarAPI.pluginCall('radio.music', 'enqueueTail', [it]); hideFloating(); };
         mPlay.onclick = async (e) => { e.stopPropagation(); const r = await window.lowbarAPI.pluginCall('radio.music', 'playNow', [it]); if (!(r && (r.result ? r.result.ok : r.ok))) alert('播放失败'); hideFloating(); };
         mNext.onclick = async (e) => { e.stopPropagation(); await window.lowbarAPI.pluginCall('radio.music', 'enqueueNext', [it]); hideFloating(); };
@@ -153,7 +153,7 @@
       }
     }
     window.addEventListener('DOMContentLoaded', initSourceSwitch);
-    window.addEventListener('DOMContentLoaded', () => { const iq = document.getElementById('q'); if (iq) { iq.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); }); try { iq.focus(); } catch {} } });
+    window.addEventListener('DOMContentLoaded', () => { const iq = document.getElementById('q'); if (iq) { iq.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); }); try { iq.focus(); } catch (e) {} } });
   </script>
 </head>
 <body>

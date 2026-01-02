@@ -44,7 +44,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!localStorage.getItem('radio.shine.audioReactive')) localStorage.setItem('radio.shine.audioReactive','1');
     if (!localStorage.getItem('radio.lyric.pair.ms')) localStorage.setItem('radio.lyric.pair.ms','600');
     if (!localStorage.getItem('radio.lyric.back.ms')) localStorage.setItem('radio.lyric.back.ms','300');
-  } catch {}
+  } catch (e) {}
   let audioCtx = null;
   let analyser = null;
   let mediaSrc = null;
@@ -70,7 +70,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (!ex) return;
       const arr = ex.querySelectorAll('.fluentShine');
       arr.forEach((el)=>{ el.style.animationPlayState = running ? 'running' : 'paused'; });
-    } catch {}
+    } catch (e) {}
   }
   function updateRotateDurations(k){
     const style = document.getElementById('EX_background_fluentShine_style');
@@ -101,7 +101,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!audio) return;
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    } catch { return; }
+    } catch (e) { return; }
     if (!audioCtx) return;
     try {
       if (!analyser) analyser = audioCtx.createAnalyser();
@@ -111,9 +111,9 @@ window.addEventListener('DOMContentLoaded', () => {
       mediaSrc.connect(analyser);
       analyser.connect(audioCtx.destination);
       freqBuf = new Uint8Array(analyser.frequencyBinCount);
-      try { timeBuf = new Float32Array(analyser.fftSize || 2048); } catch { timeBuf = new Float32Array(2048); }
+      try { timeBuf = new Float32Array(analyser.fftSize || 2048); } catch (e) { timeBuf = new Float32Array(2048); }
       analysisRunning = true;
-    } catch {}
+    } catch (e) {}
     spectrumEnabled = (String(localStorage.getItem('radio.spectrum.enabled')||'1') !== '0');
     try {
       if (spectrumCanvas) {
@@ -128,7 +128,7 @@ window.addEventListener('DOMContentLoaded', () => {
         window.addEventListener('resize', resize);
         spectrumCanvas.style.display = spectrumEnabled ? '' : 'none';
       }
-    } catch {}
+    } catch (e) {}
     const ch = new URL(location.href).searchParams.get('channel')||'';
     const ids = ['tab-recommend','tab-search','tab-settings','tab-about'];
     const minScale = Math.max(1, parseFloat(localStorage.getItem('radio.icon.scale.min')||'1.0'));
@@ -160,7 +160,7 @@ window.addEventListener('DOMContentLoaded', () => {
       specRanges = out;
       specEma = new Array(specRanges.length).fill(0);
       specBars = bars;
-    } catch {}
+    } catch (e) {}
     const ema = [0,0,0,0];
     const baseEma = [0,0,0,0];
     const bandV = [0,0,0,0];
@@ -168,8 +168,8 @@ window.addEventListener('DOMContentLoaded', () => {
     let lastTempoTs = 0;
     function loop(){
       if (!analysisRunning || !analyser) return;
-      try { analyser.getByteFrequencyData(freqBuf); } catch { requestAnimationFrame(loop); return; }
-      try { if (timeBuf && timeBuf.length) analyser.getFloatTimeDomainData(timeBuf); } catch {}
+      try { analyser.getByteFrequencyData(freqBuf); } catch (e) { requestAnimationFrame(loop); return; }
+      try { if (timeBuf && timeBuf.length) analyser.getFloatTimeDomainData(timeBuf); } catch (e) {}
       for (let i=0;i<4;i++){
         const [s,e] = ranges[i];
         let sum=0; let n=Math.max(1, e-s+1);
@@ -239,7 +239,7 @@ window.addEventListener('DOMContentLoaded', () => {
             ex2.style.setProperty('--shine-s3', String(scales[2]||1));
             ex2.style.setProperty('--shine-s4', String(scales[3]||1));
           }
-        } catch {}
+        } catch (e) {}
         scaleLast = scales;
       }
       try {
@@ -270,7 +270,7 @@ window.addEventListener('DOMContentLoaded', () => {
             spectrumCtx.fillRect(x, y, bw-1, bh);
           }
         }
-      } catch {}
+      } catch (e) {}
       requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
@@ -307,8 +307,8 @@ window.addEventListener('DOMContentLoaded', () => {
       if (biliCollapseBtn) biliCollapseBtn.innerHTML = '<i class="ri-subtract-line"></i> 收起';
       if (biliExpandBtn) biliExpandBtn.innerHTML = '<i class="ri-expand-diagonal-line"></i> 放大';
     }
-  } catch {} }
-  function setBiliMode(m){ biliMode = m; try { localStorage.setItem('radio.biliVideo.mode', biliMode); } catch {} applyBiliMode(); }
+  } catch (e) {} }
+  function setBiliMode(m){ biliMode = m; try { localStorage.setItem('radio.biliVideo.mode', biliMode); } catch (e) {} applyBiliMode(); }
     if (musicUrl) {
       audio.src = musicUrl;
       audioBar.style.display = 'flex';
@@ -316,13 +316,13 @@ window.addEventListener('DOMContentLoaded', () => {
       audioTitle.textContent = title || '';
       audioArtist.textContent = artist || '';
       if (songLoading) songLoading.style.display = 'flex';
-      try { audio.play(); } catch { }
-      try { setupAudioAnalysis(); } catch { }
+      try { audio.play(); } catch (e) { }
+      try { setupAudioAnalysis(); } catch (e) { }
       setRotatePlayState(true);
-      try { updateFullscreenStyles(); let tries = 0; const tmr = setInterval(() => { updateFullscreenStyles(); if (++tries >= 10) clearInterval(tmr); }, 100); } catch { }
+      try { updateFullscreenStyles(); let tries = 0; const tmr = setInterval(() => { updateFullscreenStyles(); if (++tries >= 10) clearInterval(tmr); }, 100); } catch (e) { }
       if (musicSource === 'bili' && biliFloat && biliVideo) {
         biliFloat.style.display = 'block';
-        try { biliVideo.src = musicUrl; biliVideo.muted = true; biliVideo.play(); } catch { }
+        try { biliVideo.src = musicUrl; biliVideo.muted = true; biliVideo.play(); } catch (e) { }
         applyBiliMode();
       } else {
         if (biliFloat) biliFloat.style.display = 'none';
@@ -349,7 +349,7 @@ window.addEventListener('DOMContentLoaded', () => {
         ex.style.setProperty('--shine-s2','1');
         ex.style.setProperty('--shine-s3','1');
         ex.style.setProperty('--shine-s4','1');
-      } catch {}
+      } catch (e) {}
       document.body.appendChild(ex);
       for (let i = 1; i <= 4; i++) {
         const d = document.createElement('div');
@@ -383,7 +383,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   const bgMode = (localStorage.getItem('radio.bgmode') || 'blur');
   if (albumUrl) { if (bgMode === 'shine') applyFluentShine(albumUrl); else applyBlurBackground(albumUrl); }
-  function applyBackgroundCurrent(){ try { const src = document.getElementById('audioCover')?.src || albumUrl || ''; if (!src) return; const mode = localStorage.getItem('radio.bgmode') || 'blur'; if (mode === 'shine') applyFluentShine(src); else applyBlurBackground(src); } catch {} }
+  function applyBackgroundCurrent(){ try { const src = document.getElementById('audioCover')?.src || albumUrl || ''; if (!src) return; const mode = localStorage.getItem('radio.bgmode') || 'blur'; if (mode === 'shine') applyFluentShine(src); else applyBlurBackground(src); } catch (e) {} }
   async function renderLyricsForKuwo(id) {
     try {
       const le = document.getElementById('lyrics'); if (le) le.textContent = '';
@@ -394,10 +394,10 @@ window.addEventListener('DOMContentLoaded', () => {
       const bin = atob(String(data.dataBase64 || ''));
       const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
       let text = '';
-      try { text = new TextDecoder('gb18030', { fatal: false }).decode(arr); } catch { text = new TextDecoder('utf-8').decode(arr); }
+      try { text = new TextDecoder('gb18030', { fatal: false }).decode(arr); } catch (e) { text = new TextDecoder('utf-8').decode(arr); }
       const yrc = lrcxToYrcArr(text);
       mountYrc2_stream(yrc);
-    } catch { }
+    } catch (e) { }
     finally { if (lyricsLoading) lyricsLoading.style.display = 'none'; }
   }
   function lrcxToYrcArr(krc) { const lines = String(krc || '').split('\n').filter(l => l.trim()); const yrc = []; let w = 0; for (const line of lines) { const m = line.match(/^\[(\d+):(\d+)\.(\d+)\](.*)/); if (!m) { const mk = line.match(/^\[kuwo:(\d+)\]/); if (mk) { w = parseInt(mk[1], 8) || 0; } continue; } const minutes = parseInt(m[1], 10), seconds = parseInt(m[2], 10), ms = parseInt(String(m[3]).padEnd(3, '0'), 10); const ts = minutes * 60000 + seconds * 1000 + ms; const content = m[4]; const words = []; const re = /<(\d+),(-?\d+)>([^<]*)/g; let mm; const k1 = Math.floor(w / 10), k2 = w % 10; while ((mm = re.exec(content))) { const v1 = parseInt(mm[1], 10), v2 = parseInt(mm[2], 10); const start = (v1 + v2) / (k1 * 2); const dur = (v1 - v2) / (k2 * 2); words.push({ t: ts + start, d: dur, tx: mm[3] }); } let ld = 0; if (words.length) { const last = words[words.length - 1]; ld = last.t + last.d - ts; } yrc.push({ t: ts, d: ld, c: words }); } return yrc; }
@@ -478,7 +478,7 @@ function mountYrc2_pair(yrc) {
     c.dataset.d = String(dmax);
     const r1 = makeRow(origin, 'origin'); c.appendChild(r1);
     if (trans) { const r2 = makeRow(trans, 'trans'); r2.style.marginTop = '6px'; c.appendChild(r2); } else { c.classList.add('single'); }
-    c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch { } };
+    c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch (e) { } };
     el.appendChild(c);
   }
   // leftover non-timed lines as singles to avoid losing content
@@ -491,7 +491,7 @@ function mountYrc2_pair(yrc) {
     c.dataset.t = String(t0);
     c.dataset.d = String(dmax);
     const r1 = makeRow(l, 'origin'); c.appendChild(r1);
-    c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch { } };
+    c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch (e) { } };
     el.appendChild(c);
   }
   let userScrollTs = 0; let touchStartY = 0;
@@ -518,7 +518,7 @@ function mountYrc2_pair(yrc) {
           });
         });
       });
-      if (active) { const now = Date.now(); if (now - userScrollTs > AUTO_SCROLL_PAUSE_MS) { const rect = active.getBoundingClientRect(); const viewMid = window.innerHeight * 0.42; const dy = rect.top + (rect.height / 2) - viewMid; try { el.scrollTo({ top: el.scrollTop + dy, behavior: 'smooth' }); } catch { el.scrollTop += dy; } } }
+      if (active) { const now = Date.now(); if (now - userScrollTs > AUTO_SCROLL_PAUSE_MS) { const rect = active.getBoundingClientRect(); const viewMid = window.innerHeight * 0.42; const dy = rect.top + (rect.height / 2) - viewMid; try { el.scrollTo({ top: el.scrollTop + dy, behavior: 'smooth' }); } catch (e) { el.scrollTop += dy; } } }
     }
     audio.addEventListener('timeupdate', update);
   }
@@ -548,7 +548,7 @@ function mountYrc2_pair(yrc) {
       const kind = (anyTimed && !hasWordTiming(line)) ? 'trans' : 'origin';
       const r = makeRow(line, kind);
       c.appendChild(r);
-      c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch { } };
+      c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch (e) { } };
       el.appendChild(c);
     });
     let userScrollTs = 0; let touchStartY = 0;
@@ -575,31 +575,31 @@ function mountYrc2_pair(yrc) {
           });
         });
       });
-      if (active) { const now = Date.now(); if (now - userScrollTs > AUTO_SCROLL_PAUSE_MS) { const rect = active.getBoundingClientRect(); const viewMid = window.innerHeight * 0.42; const dy = rect.top + (rect.height / 2) - viewMid; try { el.scrollTo({ top: el.scrollTop + dy, behavior: 'smooth' }); } catch { el.scrollTop += dy; } } }
+      if (active) { const now = Date.now(); if (now - userScrollTs > AUTO_SCROLL_PAUSE_MS) { const rect = active.getBoundingClientRect(); const viewMid = window.innerHeight * 0.42; const dy = rect.top + (rect.height / 2) - viewMid; try { el.scrollTo({ top: el.scrollTop + dy, behavior: 'smooth' }); } catch (e) { el.scrollTop += dy; } } }
     }
     audio.addEventListener('timeupdate', update);
   }
-  function mountYrc2(yrc) { const el = document.getElementById('lyrics'); if (!el) return; el.innerHTML = ''; const AUTO_SCROLL_PAUSE_MS = 4000; const sorted = Array.isArray(yrc) ? yrc.slice().sort((a, b) => (parseInt(a.t || 0, 10) || 0) - (parseInt(b.t || 0, 10) || 0)) : []; function makeRow(line, kind) { const row = document.createElement('div'); row.className = 'row ' + kind; row.style.whiteSpace = 'normal'; row.style.opacity = '0.9'; line.c.forEach((w, i) => { const s = document.createElement('span'); s.textContent = w.tx; s.dataset.t = w.t; s.dataset.d = w.d; s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; s.style.opacity = '0.55'; s.style.display = 'inline'; row.appendChild(s); const next = line.c[i + 1]; if (next && needSpace(w.tx, next.tx)) row.appendChild(document.createTextNode(' ')); }); return row; } const CLUSTER_MS = 600; let i = 0; while (i < sorted.length) { const start = parseInt(sorted[i].t || 0, 10) || 0; const cluster = []; let j = i; while (j < sorted.length) { const tt = parseInt(sorted[j].t || 0, 10) || 0; if (tt - start <= CLUSTER_MS) { cluster.push(sorted[j]); j++; } else break; } let origin = cluster[0]; let trans = null; if (cluster.length >= 2) { const types = cluster.map(l => ({ l, cjk: l.c.some(w => isCJK(w.tx)), lat: l.c.some(w => hasLatin(w.tx)) })); const nonCjk = types.find(x => !x.cjk && x.lat); const cjk = types.find(x => x.cjk); if (nonCjk && cjk) { origin = nonCjk.l; trans = cjk.l; } else { origin = cluster[0]; trans = cluster[1]; } } const c = document.createElement('div'); c.className = 'line'; c.dataset.t = String(origin.t); let dmax = parseInt(origin.d || '0', 10) || 0; if (trans) dmax = Math.max(dmax, parseInt(trans.d || '0', 10) || 0); c.dataset.d = String(dmax); const r1 = makeRow(origin, 'origin'); c.appendChild(r1); if (trans) { const r2 = makeRow(trans, 'trans'); r2.style.marginTop = '2px'; c.appendChild(r2); } else { c.classList.add('single'); } c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch { } }; el.appendChild(c); const leftovers = cluster.filter(l => l !== origin && l !== trans); leftovers.forEach((ln) => { const sc = document.createElement('div'); sc.className = 'line single'; sc.dataset.t = String(ln.t); sc.dataset.d = String(parseInt(ln.d || '0', 10) || 0); const r = makeRow(ln, 'origin'); sc.appendChild(r); sc.onclick = () => { try { audio.currentTime = (parseInt(sc.dataset.t || '0', 10)) / 1000; } catch { } }; el.appendChild(sc); }); i = j; } let userScrollTs = 0; let touchStartY = 0; el.addEventListener('wheel', () => { userScrollTs = Date.now(); }); el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } }); el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } }); function update() { const t = audio.currentTime * 1000; const lines = Array.from(el.querySelectorAll('.line')); let active = null; for (let k = 0; k < lines.length; k++) { const c = lines[k]; const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); if (t >= lt && t < lt + ld) { active = c; break; } } lines.forEach((c) => { const rows = c.querySelectorAll('.row'); const isActive = (c === active); rows.forEach((row) => { row.style.opacity = isActive ? '1' : '0.7'; const spans = row.querySelectorAll('span'); spans.forEach((s) => { const st = parseInt(s.dataset.t || '0', 10); const sd = parseInt(s.dataset.d || '0', 10); const se = st + sd; if (isActive && t >= st && t < se) { s.style.opacity = '1'; } else if (isActive && t >= se) { s.style.opacity = '1'; } else { s.style.opacity = '0.5'; } }); }); }); if (active && (Date.now() - userScrollTs > AUTO_SCROLL_PAUSE_MS)) { const rect = active.getBoundingClientRect(); const mid = rect.top + (rect.height / 2); const viewMid = window.innerHeight * 0.42; const dy = mid - viewMid; try { el.scrollTo({ top: el.scrollTop + dy, behavior: 'smooth' }); } catch { el.scrollTop += dy; } } } audio.addEventListener('timeupdate', update); }
-  function mountYrc(yrc) { const el = document.getElementById('lyrics'); if (!el) return; el.innerHTML = ''; yrc.forEach((line) => { const c = document.createElement('div'); c.className = 'line'; c.dataset.t = line.t; c.dataset.d = line.d; const row = document.createElement('div'); row.style.whiteSpace = 'normal'; row.style.opacity = '0.9'; line.c.forEach((w, i) => { const s = document.createElement('span'); s.textContent = w.tx; s.dataset.t = w.t; s.dataset.d = w.d; s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; s.style.opacity = '0.55'; s.style.display = 'inline'; row.appendChild(s); if (i < line.c.length - 1) row.appendChild(document.createTextNode(' ')); }); c.appendChild(row); c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch { } }; el.appendChild(c); }); let userScrollTs = 0; let touchStartY = 0; el.addEventListener('wheel', () => { userScrollTs = Date.now(); }); el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } }); el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } }); function update() { const t = audio.currentTime * 1000; const lines = Array.from(el.querySelectorAll('.line')); let active = null; for (let i = 0; i < lines.length; i++) { const c = lines[i]; const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); if (t >= lt && t < lt + ld) { active = c; break; } } lines.forEach((c) => { const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); const row = c.firstChild; const isActive = (c === active); row.style.opacity = isActive ? '1' : '0.7'; const spans = row.querySelectorAll('span'); spans.forEach((s) => { const st = parseInt(s.dataset.t || '0', 10); const sd = parseInt(s.dataset.d || '0', 10); const se = st + sd; if (isActive && t >= st && t < se) { s.style.opacity = '1'; } else if (isActive && t >= se) { s.style.opacity = '1'; } else { s.style.opacity = '0.5'; } }); }); if (active && (Date.now() - userScrollTs > 250)) { const rect = active.getBoundingClientRect(); const mid = rect.top + (rect.height / 2); const viewMid = (window.innerHeight / 2); const dy = mid - viewMid; const el2 = document.getElementById('lyrics'); el2.scrollTop += dy; } } audio.addEventListener('timeupdate', update); }
+  function mountYrc2(yrc) { const el = document.getElementById('lyrics'); if (!el) return; el.innerHTML = ''; const AUTO_SCROLL_PAUSE_MS = 4000; const sorted = Array.isArray(yrc) ? yrc.slice().sort((a, b) => (parseInt(a.t || 0, 10) || 0) - (parseInt(b.t || 0, 10) || 0)) : []; function makeRow(line, kind) { const row = document.createElement('div'); row.className = 'row ' + kind; row.style.whiteSpace = 'normal'; row.style.opacity = '0.9'; line.c.forEach((w, i) => { const s = document.createElement('span'); s.textContent = w.tx; s.dataset.t = w.t; s.dataset.d = w.d; s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; s.style.opacity = '0.55'; s.style.display = 'inline'; row.appendChild(s); const next = line.c[i + 1]; if (next && needSpace(w.tx, next.tx)) row.appendChild(document.createTextNode(' ')); }); return row; } const CLUSTER_MS = 600; let i = 0; while (i < sorted.length) { const start = parseInt(sorted[i].t || 0, 10) || 0; const cluster = []; let j = i; while (j < sorted.length) { const tt = parseInt(sorted[j].t || 0, 10) || 0; if (tt - start <= CLUSTER_MS) { cluster.push(sorted[j]); j++; } else break; } let origin = cluster[0]; let trans = null; if (cluster.length >= 2) { const types = cluster.map(l => ({ l, cjk: l.c.some(w => isCJK(w.tx)), lat: l.c.some(w => hasLatin(w.tx)) })); const nonCjk = types.find(x => !x.cjk && x.lat); const cjk = types.find(x => x.cjk); if (nonCjk && cjk) { origin = nonCjk.l; trans = cjk.l; } else { origin = cluster[0]; trans = cluster[1]; } } const c = document.createElement('div'); c.className = 'line'; c.dataset.t = String(origin.t); let dmax = parseInt(origin.d || '0', 10) || 0; if (trans) dmax = Math.max(dmax, parseInt(trans.d || '0', 10) || 0); c.dataset.d = String(dmax); const r1 = makeRow(origin, 'origin'); c.appendChild(r1); if (trans) { const r2 = makeRow(trans, 'trans'); r2.style.marginTop = '2px'; c.appendChild(r2); } else { c.classList.add('single'); } c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch (e) { } }; el.appendChild(c); const leftovers = cluster.filter(l => l !== origin && l !== trans); leftovers.forEach((ln) => { const sc = document.createElement('div'); sc.className = 'line single'; sc.dataset.t = String(ln.t); sc.dataset.d = String(parseInt(ln.d || '0', 10) || 0); const r = makeRow(ln, 'origin'); sc.appendChild(r); sc.onclick = () => { try { audio.currentTime = (parseInt(sc.dataset.t || '0', 10)) / 1000; } catch (e) { } }; el.appendChild(sc); }); i = j; } let userScrollTs = 0; let touchStartY = 0; el.addEventListener('wheel', () => { userScrollTs = Date.now(); }); el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } }); el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } }); function update() { const t = audio.currentTime * 1000; const lines = Array.from(el.querySelectorAll('.line')); let active = null; for (let k = 0; k < lines.length; k++) { const c = lines[k]; const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); if (t >= lt && t < lt + ld) { active = c; break; } } lines.forEach((c) => { const rows = c.querySelectorAll('.row'); const isActive = (c === active); rows.forEach((row) => { row.style.opacity = isActive ? '1' : '0.7'; const spans = row.querySelectorAll('span'); spans.forEach((s) => { const st = parseInt(s.dataset.t || '0', 10); const sd = parseInt(s.dataset.d || '0', 10); const se = st + sd; if (isActive && t >= st && t < se) { s.style.opacity = '1'; } else if (isActive && t >= se) { s.style.opacity = '1'; } else { s.style.opacity = '0.5'; } }); }); }); if (active && (Date.now() - userScrollTs > AUTO_SCROLL_PAUSE_MS)) { const rect = active.getBoundingClientRect(); const mid = rect.top + (rect.height / 2); const viewMid = window.innerHeight * 0.42; const dy = mid - viewMid; try { el.scrollTo({ top: el.scrollTop + dy, behavior: 'smooth' }); } catch (e) { el.scrollTop += dy; } } } audio.addEventListener('timeupdate', update); }
+  function mountYrc(yrc) { const el = document.getElementById('lyrics'); if (!el) return; el.innerHTML = ''; yrc.forEach((line) => { const c = document.createElement('div'); c.className = 'line'; c.dataset.t = line.t; c.dataset.d = line.d; const row = document.createElement('div'); row.style.whiteSpace = 'normal'; row.style.opacity = '0.9'; line.c.forEach((w, i) => { const s = document.createElement('span'); s.textContent = w.tx; s.dataset.t = w.t; s.dataset.d = w.d; s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; s.style.opacity = '0.55'; s.style.display = 'inline'; row.appendChild(s); if (i < line.c.length - 1) row.appendChild(document.createTextNode(' ')); }); c.appendChild(row); c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch (e) { } }; el.appendChild(c); }); let userScrollTs = 0; let touchStartY = 0; el.addEventListener('wheel', () => { userScrollTs = Date.now(); }); el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } }); el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } }); function update() { const t = audio.currentTime * 1000; const lines = Array.from(el.querySelectorAll('.line')); let active = null; for (let i = 0; i < lines.length; i++) { const c = lines[i]; const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); if (t >= lt && t < lt + ld) { active = c; break; } } lines.forEach((c) => { const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); const row = c.firstChild; const isActive = (c === active); row.style.opacity = isActive ? '1' : '0.7'; const spans = row.querySelectorAll('span'); spans.forEach((s) => { const st = parseInt(s.dataset.t || '0', 10); const sd = parseInt(s.dataset.d || '0', 10); const se = st + sd; if (isActive && t >= st && t < se) { s.style.opacity = '1'; } else if (isActive && t >= se) { s.style.opacity = '1'; } else { s.style.opacity = '0.5'; } }); }); if (active && (Date.now() - userScrollTs > 250)) { const rect = active.getBoundingClientRect(); const mid = rect.top + (rect.height / 2); const viewMid = (window.innerHeight / 2); const dy = mid - viewMid; const el2 = document.getElementById('lyrics'); el2.scrollTop += dy; } } audio.addEventListener('timeupdate', update); }
   if (musicId && musicSource === 'kuwo') renderLyricsForKuwo(musicId);
   function formatTime(sec) { if (!sec) return '0:00'; const s = Math.floor(sec); const m = Math.floor(s / 60); const r = s % 60; return `${m}:${String(r).padStart(2, '0')}`; }
   const progressCurrent = document.getElementById('progressCurrent');
   const progressDuration = document.getElementById('progressDuration');
-  async function getSystemNow(){ try { const r = await window.lowbarAPI.pluginCall('radio.music', 'getVariable', ['timeISO']); const d = r && r.result ? r.result : r; const iso = typeof d === 'string' ? d : (d && d.value ? d.value : ''); const t = iso ? Date.parse(iso) : Date.now(); return new Date(t); } catch { return new Date(); } }
+  async function getSystemNow(){ try { const r = await window.lowbarAPI.pluginCall('radio.music', 'getVariable', ['timeISO']); const d = r && r.result ? r.result : r; const iso = typeof d === 'string' ? d : (d && d.value ? d.value : ''); const t = iso ? Date.parse(iso) : Date.now(); return new Date(t); } catch (e) { return new Date(); } }
   function updateProgress() { if (!audio || !audio.duration) return; const pct = (audio.currentTime / audio.duration); progress.style.width = `${pct * 100}%`; progressDot.style.left = `${pct * 100}%`; if (progressCurrent) progressCurrent.textContent = formatTime(audio.currentTime); if (progressDuration) progressDuration.textContent = formatTime(audio.duration); }
   audio.addEventListener('timeupdate', updateProgress);
   audio.addEventListener('loadedmetadata', updateProgress);
   audio.addEventListener('canplay', () => { if (songLoading) songLoading.style.display = 'none'; });
   audio.addEventListener('waiting', () => { if (songLoading) songLoading.style.display = 'flex'; });
-  audio.addEventListener('play', () => { if (biliVideo && musicSource === 'bili') { try { biliVideo.play(); } catch { } } });
-  audio.addEventListener('pause', () => { if (biliVideo && musicSource === 'bili') { try { biliVideo.pause(); } catch { } } });
+  audio.addEventListener('play', () => { if (biliVideo && musicSource === 'bili') { try { biliVideo.play(); } catch (e) { } } });
+  audio.addEventListener('pause', () => { if (biliVideo && musicSource === 'bili') { try { biliVideo.pause(); } catch (e) { } } });
   audio.addEventListener('play', () => { setRotatePlayState(true); });
   audio.addEventListener('pause', () => { setRotatePlayState(false); });
   audio.addEventListener('ended', () => { setRotatePlayState(false); });
-  audio.addEventListener('timeupdate', () => { if (biliVideo && musicSource === 'bili') { try { const dt = Math.abs((biliVideo.currentTime||0) - (audio.currentTime||0)); if (dt > 0.5) biliVideo.currentTime = audio.currentTime; } catch { } } });
+  audio.addEventListener('timeupdate', () => { if (biliVideo && musicSource === 'bili') { try { const dt = Math.abs((biliVideo.currentTime||0) - (audio.currentTime||0)); if (dt > 0.5) biliVideo.currentTime = audio.currentTime; } catch (e) { } } });
   if (biliCollapseBtn) biliCollapseBtn.onclick = () => { setBiliMode(biliMode === 'hidden' ? 'float' : 'hidden'); };
   if (biliExpandBtn) biliExpandBtn.onclick = () => { setBiliMode(biliMode === 'expand' ? 'float' : 'expand'); };
-  try { if (bgModePanel) { const items = bgModePanel.querySelectorAll('.bgmode-item'); items.forEach((el) => { el.onclick = () => { try { const m = el.dataset.mode || 'blur'; localStorage.setItem('radio.bgmode', m); bgModePanel.style.display = 'none'; applyBackgroundCurrent(); } catch {} }; }); } } catch {}
+  try { if (bgModePanel) { const items = bgModePanel.querySelectorAll('.bgmode-item'); items.forEach((el) => { el.onclick = () => { try { const m = el.dataset.mode || 'blur'; localStorage.setItem('radio.bgmode', m); bgModePanel.style.display = 'none'; applyBackgroundCurrent(); } catch (e) {} }; }); } } catch (e) {}
   let isDragging = false;
   function seekByClientX(x){ if (!audio.duration) return; const rect = progressBar.getBoundingClientRect(); const pct = Math.max(0, Math.min(1, (x - rect.left) / rect.width)); audio.currentTime = pct * audio.duration; }
   if (progressBar) {
@@ -611,7 +611,7 @@ function mountYrc2_pair(yrc) {
     window.addEventListener('touchmove', (e) => { if (isDragging && e.touches && e.touches.length) { seekByClientX(e.touches[0].clientX); } });
     window.addEventListener('touchend', () => { isDragging = false; });
   }
-  audio.addEventListener('ended', async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'nextTrack', ['ended']); } catch { } });
+  audio.addEventListener('ended', async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'nextTrack', ['ended']); } catch (e) { } });
   async function loadPlaylist() {
     try {
       const r = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []);
@@ -626,7 +626,7 @@ function mountYrc2_pair(yrc) {
         if (!listEl.dataset.captureBound) {
           listEl.addEventListener('mousedown', (e) => {
             const row = e.target && e.target.closest ? e.target.closest('.item') : null;
-            if (row) { try { e.stopImmediatePropagation(); } catch {} }
+            if (row) { try { e.stopImmediatePropagation(); } catch (e) {} }
           }, true);
           listEl.dataset.captureBound = '1';
         }
@@ -637,32 +637,32 @@ function mountYrc2_pair(yrc) {
             e.preventDefault();
             const idx = Array.prototype.indexOf.call(listEl.children, row);
             if (idx >= 0) {
-              try { await window.lowbarAPI.pluginCall('radio.music', 'removeIndex', [idx]); } catch {}
+              try { await window.lowbarAPI.pluginCall('radio.music', 'removeIndex', [idx]); } catch (e) {}
             }
           });
           listEl.dataset.ctxBound = '1';
         }
-      } catch {}
-      data.items.forEach((it, idx) => { const row = document.createElement('div'); row.className = 'item'; const name = document.createElement('div'); name.textContent = `${it.title || ''}`; const dur = document.createElement('div'); dur.textContent = fmt(it.duration || 0); row.appendChild(name); row.appendChild(dur); if (idx === data.currentIndex) row.classList.add('active'); row.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'playIndex', [idx]); } catch { } }; let pressTimer = null; row.addEventListener('mousedown', () => { pressTimer = setTimeout(async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'removeIndex', [idx]); } catch { } }, 600); }); row.addEventListener('mouseup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); row.addEventListener('mouseleave', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); listEl.appendChild(row); }); try { const tt = document.getElementById('playlistTotalText'); if (tt) tt.textContent = `总时长：${fmt(data.totalSecs || 0)}`; } catch { } try { const finEl = document.getElementById('playlistFinish'); if (finEl) { const startIdx = Math.max(0, data.currentIndex || 0); const remainList = Array.isArray(data.items) ? data.items.slice(startIdx) : []; const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const dt = new Date(Date.now() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } } catch { } if (empty) empty.style.display = (data.items.length === 0) ? 'flex' : 'none'; if (!musicUrl && data.items.length > 0) { const last = data.items[data.items.length - 1]; try { if (last) { document.getElementById('audioCover').src = last.cover || ''; document.getElementById('audioTitle').textContent = last.title || ''; document.getElementById('audioArtist').textContent = last.artist || ''; } } catch { } }
-    } catch { }
+      } catch (e) {}
+      data.items.forEach((it, idx) => { const row = document.createElement('div'); row.className = 'item'; const name = document.createElement('div'); name.textContent = `${it.title || ''}`; const dur = document.createElement('div'); dur.textContent = fmt(it.duration || 0); row.appendChild(name); row.appendChild(dur); if (idx === data.currentIndex) row.classList.add('active'); row.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'playIndex', [idx]); } catch (e) { } }; let pressTimer = null; row.addEventListener('mousedown', () => { pressTimer = setTimeout(async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'removeIndex', [idx]); } catch (e) { } }, 600); }); row.addEventListener('mouseup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); row.addEventListener('mouseleave', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); listEl.appendChild(row); }); try { const tt = document.getElementById('playlistTotalText'); if (tt) tt.textContent = `总时长：${fmt(data.totalSecs || 0)}`; } catch (e) { } try { const finEl = document.getElementById('playlistFinish'); if (finEl) { const startIdx = Math.max(0, data.currentIndex || 0); const remainList = Array.isArray(data.items) ? data.items.slice(startIdx) : []; const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const dt = new Date(Date.now() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } } catch (e) { } if (empty) empty.style.display = (data.items.length === 0) ? 'flex' : 'none'; if (!musicUrl && data.items.length > 0) { const last = data.items[data.items.length - 1]; try { if (last) { document.getElementById('audioCover').src = last.cover || ''; document.getElementById('audioTitle').textContent = last.title || ''; document.getElementById('audioArtist').textContent = last.artist || ''; } } catch (e) { } }
+    } catch (e) { }
   }
   let lastFinishUpdateTs = 0;
-  async function updateFinishEstimate() { try { const finEl = document.getElementById('playlistFinish'); if (!finEl) return; if (Date.now() - lastFinishUpdateTs < 3000) return; lastFinishUpdateTs = Date.now(); const r = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []); const data = r && r.result ? r.result : r; if (!data || !Array.isArray(data.items)) return; const startIdx = Math.max(0, data.currentIndex || 0); const remainList = data.items.slice(startIdx); const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const base = await getSystemNow(); const dt = new Date(base.getTime() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } catch { } }
-  try { audio.addEventListener('timeupdate', updateFinishEstimate); } catch { }
+  async function updateFinishEstimate() { try { const finEl = document.getElementById('playlistFinish'); if (!finEl) return; if (Date.now() - lastFinishUpdateTs < 3000) return; lastFinishUpdateTs = Date.now(); const r = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []); const data = r && r.result ? r.result : r; if (!data || !Array.isArray(data.items)) return; const startIdx = Math.max(0, data.currentIndex || 0); const remainList = data.items.slice(startIdx); const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const base = await getSystemNow(); const dt = new Date(base.getTime() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } catch (e) { } }
+  try { audio.addEventListener('timeupdate', updateFinishEstimate); } catch (e) { }
   loadPlaylist();
-  try { const ch = new URL(location.href).searchParams.get('channel'); if (ch) { window.lowbarAPI.subscribe?.(ch); window.lowbarAPI.onEvent?.((name, payload) => { if (name === ch && payload && payload.type === 'update') { if (payload.target === 'playlist') { loadPlaylist(); try { applyBackgroundCurrent(); } catch {} (async () => { try { const r2 = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []); const d2 = r2 && r2.result ? r2.result : r2; if (d2 && Array.isArray(d2.items) && d2.currentIndex >= 0) { const cur = d2.items[d2.currentIndex]; const le = document.getElementById('lyrics'); if (cur && cur.id && cur.source === 'kuwo') { await renderLyricsForKuwo(cur.id); } else { if (le) le.textContent = ''; } } } catch { } })(); } else if (payload.target === 'songLoading') { try { const x = document.getElementById('songLoading'); if (x) x.style.display = (payload.value === 'show') ? 'flex' : 'none'; } catch { } } else if (payload.target === 'bgModePanel') { try { if (!bgModePanel) return; const v = String(payload.value||''); if (v === 'toggle') { const cur = bgModePanel.style.display; bgModePanel.style.display = (!cur || cur==='none') ? 'flex' : 'none'; } else if (v === 'show') bgModePanel.style.display = 'flex'; else if (v === 'hide') bgModePanel.style.display = 'none'; } catch {} } else if (payload.target === 'bgModeApply') { try { applyBackgroundCurrent(); spectrumEnabled = (String(localStorage.getItem('radio.spectrum.enabled')||'1') !== '0'); if (spectrumCanvas) { spectrumCanvas.style.display = spectrumEnabled ? '' : 'none'; try { spectrumCanvas.width = spectrumCanvas.clientWidth; spectrumCanvas.height = spectrumCanvas.clientHeight; } catch {} } updateFullscreenStyles(); } catch {} } } }); } } catch { }
-  try { const toggle = document.getElementById('removeAfterPlay'); async function initToggle() { try { const r = await window.lowbarAPI.pluginCall('radio.music', 'getSettings', []); const d = r && r.result ? r.result : r; const cur = !!(d && d.settings && d.settings.removeAfterPlay); if (toggle) toggle.checked = cur; } catch { } } function persistLocal() { try { if (toggle) localStorage.setItem('radio.removeAfterPlay', toggle.checked ? '1' : '0'); } catch { } } if (toggle) { initToggle(); toggle.addEventListener('change', async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'setRemoveAfterPlay', [toggle.checked]); persistLocal(); } catch { } }); } } catch { }
-  try { const addBtn = document.getElementById('playlistAddBtn'); if (addBtn) addBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'onLowbarEvent', [{ type: 'click', id: 'tab-search' }]); } catch { } }; } catch { }
+  try { const ch = new URL(location.href).searchParams.get('channel'); if (ch) { window.lowbarAPI.subscribe?.(ch); window.lowbarAPI.onEvent?.((name, payload) => { if (name === ch && payload && payload.type === 'update') { if (payload.target === 'playlist') { loadPlaylist(); try { applyBackgroundCurrent(); } catch (e) {} (async () => { try { const r2 = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []); const d2 = r2 && r2.result ? r2.result : r2; if (d2 && Array.isArray(d2.items) && d2.currentIndex >= 0) { const cur = d2.items[d2.currentIndex]; const le = document.getElementById('lyrics'); if (cur && cur.id && cur.source === 'kuwo') { await renderLyricsForKuwo(cur.id); } else { if (le) le.textContent = ''; } } } catch (e) { } })(); } else if (payload.target === 'songLoading') { try { const x = document.getElementById('songLoading'); if (x) x.style.display = (payload.value === 'show') ? 'flex' : 'none'; } catch (e) { } } else if (payload.target === 'bgModePanel') { try { if (!bgModePanel) return; const v = String(payload.value||''); if (v === 'toggle') { const cur = bgModePanel.style.display; bgModePanel.style.display = (!cur || cur==='none') ? 'flex' : 'none'; } else if (v === 'show') bgModePanel.style.display = 'flex'; else if (v === 'hide') bgModePanel.style.display = 'none'; } catch (e) {} } else if (payload.target === 'bgModeApply') { try { applyBackgroundCurrent(); spectrumEnabled = (String(localStorage.getItem('radio.spectrum.enabled')||'1') !== '0'); if (spectrumCanvas) { spectrumCanvas.style.display = spectrumEnabled ? '' : 'none'; try { spectrumCanvas.width = spectrumCanvas.clientWidth; spectrumCanvas.height = spectrumCanvas.clientHeight; } catch (e) {} } updateFullscreenStyles(); } catch (e) {} } } }); } } catch (e) { }
+  try { const toggle = document.getElementById('removeAfterPlay'); async function initToggle() { try { const r = await window.lowbarAPI.pluginCall('radio.music', 'getSettings', []); const d = r && r.result ? r.result : r; const cur = !!(d && d.settings && d.settings.removeAfterPlay); if (toggle) toggle.checked = cur; } catch (e) { } } function persistLocal() { try { if (toggle) localStorage.setItem('radio.removeAfterPlay', toggle.checked ? '1' : '0'); } catch (e) { } } if (toggle) { initToggle(); toggle.addEventListener('change', async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'setRemoveAfterPlay', [toggle.checked]); persistLocal(); } catch (e) { } }); } } catch (e) { }
+  try { const addBtn = document.getElementById('playlistAddBtn'); if (addBtn) addBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'onLowbarEvent', [{ type: 'click', id: 'tab-search' }]); } catch (e) { } }; } catch (e) { }
   const prevBtn = document.getElementById('audioPrevBtn');
   const nextBtn = document.getElementById('audioNextBtn');
   const playBtn = document.getElementById('audioPlayBtn');
-  if (prevBtn) prevBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'prevTrack', []); } catch { } };
-  if (nextBtn) nextBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'nextTrack', ['manual']); } catch { } };
-  if (playBtn) { playBtn.onclick = () => { try { if (audio.paused) { audio.play(); playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; } else { audio.pause(); playBtn.innerHTML = '<i class="ri-play-fill"></i>'; } } catch { } }; audio.addEventListener('play', () => { playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; }); audio.addEventListener('pause', () => { playBtn.innerHTML = '<i class="ri-play-fill"></i>'; }); }
-  try { audio.addEventListener('play', updateFullscreenStyles); } catch { }
+  if (prevBtn) prevBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'prevTrack', []); } catch (e) { } };
+  if (nextBtn) nextBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'nextTrack', ['manual']); } catch (e) { } };
+  if (playBtn) { playBtn.onclick = () => { try { if (audio.paused) { audio.play(); playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; } else { audio.pause(); playBtn.innerHTML = '<i class="ri-play-fill"></i>'; } } catch (e) { } }; audio.addEventListener('play', () => { playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; }); audio.addEventListener('pause', () => { playBtn.innerHTML = '<i class="ri-play-fill"></i>'; }); }
+  try { audio.addEventListener('play', updateFullscreenStyles); } catch (e) { }
 });
-function updateFullscreenStyles() { try { const fsMatch = (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches); const fs = !!document.fullscreenElement || fsMatch || (window.innerHeight >= (screen.availHeight - 1)); const bar = document.getElementById('audioBar'); if (bar) bar.style.bottom = fs ? '96px' : '16px'; const content = document.querySelector('.content-area'); if (bar && content) { const rect = bar.getBoundingClientRect(); const barH = Math.max(64, Math.floor(rect.height || 64)); const barBottomPx = parseInt(String(bar.style.bottom || '16').replace('px', ''), 10) || 16; const padding = 16; const offset = barBottomPx + barH + padding; content.style.bottom = `${offset}px`; } } catch { } }
+function updateFullscreenStyles() { try { const fsMatch = (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches); const fs = !!document.fullscreenElement || fsMatch || (window.innerHeight >= (screen.availHeight - 1)); const bar = document.getElementById('audioBar'); if (bar) bar.style.bottom = fs ? '96px' : '16px'; const content = document.querySelector('.content-area'); if (bar && content) { const rect = bar.getBoundingClientRect(); const barH = Math.max(64, Math.floor(rect.height || 64)); const barBottomPx = parseInt(String(bar.style.bottom || '16').replace('px', ''), 10) || 16; const padding = 16; const offset = barBottomPx + barH + padding; content.style.bottom = `${offset}px`; } } catch (e) { } }
 updateFullscreenStyles();
 window.addEventListener('resize', updateFullscreenStyles);
 document.addEventListener('fullscreenchange', updateFullscreenStyles);
-try { setInterval(updateFullscreenStyles, 1500); } catch { }
+try { setInterval(updateFullscreenStyles, 1500); } catch (e) { }

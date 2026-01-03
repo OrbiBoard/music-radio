@@ -527,6 +527,28 @@ const functions = {
       return { ok: false, error: e?.message || String(e) };
     }
   },
+  fetchBiliLyrics: async (bvid, cid) => {
+    try {
+      const https = require('https');
+      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
+      
+      let c = String(cid || '');
+      if (!c || c === 'default') {
+        try {
+          const v = await fetchJson(`https://api.bilibili.com/x/player/pagelist?bvid=${encodeURIComponent(String(bvid||''))}`);
+          c = v && v.data && Array.isArray(v.data) && v.data[0] && v.data[0].cid ? String(v.data[0].cid) : '';
+        } catch (e) { }
+      }
+      if (!c) return { ok: false, error: 'no cid' };
+
+      async function fetchText(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(Buffer.concat(chunks).toString('utf8')); }catch(e){ reject(e); } }); }).on('error', reject); }); }
+      
+      const content = await fetchText(`https://api.3r60.top/v2/bili/t/?bvid=${encodeURIComponent(String(bvid||''))}&cid=${encodeURIComponent(c)}`);
+      return { ok: true, content };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  },
   playIndex: async (idx = 0) => {
     try {
       const i = Math.floor(Number(idx)||0);

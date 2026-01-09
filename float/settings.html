@@ -26,25 +26,42 @@
       </div>
     </header>
     <div class="content">
-      背景层使用 AMLL DOM 歌词播放器。完整集成可参考官方文档与指南：
-      <div><a href="https://github.com/Steve-xmh/applemusic-like-lyrics" target="_blank" rel="noopener">AMLL 仓库</a></div>
-      <div style="margin-top:8px">性能建议：</div>
-      <ul>
-        <li>CPU 3.0GHz 以上可流畅 60FPS；4.2GHz 以上建议用于 144FPS。</li>
-        <li>1080p 建议 NVIDIA GTX 10 系列及以上；2160p 建议 RTX 2070 及以上。</li>
-        <li>Chromium 120+ 可完整呈现所有组件效果。</li>
-      </ul>
+      <div style="margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid #2a2a2a;">
+        <div style="margin-bottom:8px; font-weight:600;">定时提醒</div>
+        <div style="display:flex; align-items:center; gap:10px; font-size:13px; color:#aaa;">
+          <span>当时间早于</span>
+          <input type="time" id="endTime" style="background:#202020; border:1px solid #333; color:#eee; padding:4px 8px; border-radius:4px;">
+          <span>时，若点歌后预计播放结束时间超过该点，则显示红字提示。</span>
+        </div>
+      </div>
     </div>
   </div>
   <script>
     (function(){
       const openBg = document.getElementById('openBg');
       const openDebug = document.getElementById('openDebug');
+      const endTimeInput = document.getElementById('endTime');
+
+      // Load Settings
+      (async () => {
+        try {
+          const r = await window.lowbarAPI.pluginCall('music-radio', 'getSettings', []);
+          const s = (r && r.result ? r.result.settings : (r && r.settings ? r.settings : {}));
+          if (s && s.endTime && endTimeInput) endTimeInput.value = s.endTime;
+        } catch (e) {}
+      })();
+
+      if (endTimeInput) {
+        endTimeInput.addEventListener('change', async () => {
+          try { await window.lowbarAPI.pluginCall('music-radio', 'setEndTime', [endTimeInput.value]); } catch (e) {}
+        });
+      }
+
       if (openBg) openBg.addEventListener('click', () => {
-        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'click', id:'btn-bgmode' }]); } catch (e) {}
+        try { window.lowbarAPI.pluginCall('music-radio','onLowbarEvent',[{ type:'click', id:'btn-bgmode' }]); } catch (e) {}
       });
       if (openDebug) openDebug.addEventListener('click', () => {
-        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'click', id:'btn-debug-lyrics' }]); } catch (e) {}
+        try { window.lowbarAPI.pluginCall('music-radio','onLowbarEvent',[{ type:'click', id:'btn-debug-lyrics' }]); } catch (e) {}
       });
     })();
   </script>

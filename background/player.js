@@ -64,6 +64,37 @@ window.addEventListener('DOMContentLoaded', () => {
   const peakTimes = [];
   let tempoSmooth = 1;
   let volEma = 0;
+  function updateMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      const cover = albumUrl || (document.getElementById('audioCover')?.src) || '';
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: title || '未知标题',
+        artist: artist || '未知艺术家',
+        album: new URL(location.href).searchParams.get('albumName') || '',
+        artwork: cover ? [{ src: cover, sizes: '512x512', type: 'image/jpeg' }] : []
+      });
+      navigator.mediaSession.setActionHandler('play', () => { if (audio) audio.play(); });
+      navigator.mediaSession.setActionHandler('pause', () => { if (audio) audio.pause(); });
+      navigator.mediaSession.setActionHandler('previoustrack', async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'prevTrack', []); } catch (e) { } });
+      navigator.mediaSession.setActionHandler('nexttrack', async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'nextTrack', ['manual']); } catch (e) { } });
+      navigator.mediaSession.setActionHandler('seekto', (details) => { if (audio && details.seekTime !== undefined && Number.isFinite(details.seekTime)) audio.currentTime = details.seekTime; });
+      updatePlaybackState();
+    } catch (e) {}
+  }
+  function updatePlaybackState() {
+    if (!('mediaSession' in navigator) || !audio) return;
+    try {
+      navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+      if (Number.isFinite(audio.duration) && Number.isFinite(audio.currentTime)) {
+        navigator.mediaSession.setPositionState({
+          duration: audio.duration,
+          playbackRate: audio.playbackRate,
+          position: audio.currentTime
+        });
+      }
+    } catch (e) {}
+  }
   function setRotatePlayState(running){
     try {
       const ex = document.getElementById('EX_background_fluentShine');
@@ -318,6 +349,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (songLoading) songLoading.style.display = 'flex';
       try { audio.play(); } catch (e) { }
       try { setupAudioAnalysis(); } catch (e) { }
+      try { updateMediaSession(); } catch (e) { }
       setRotatePlayState(true);
       try { updateFullscreenStyles(); let tries = 0; const tmr = setInterval(() => { updateFullscreenStyles(); if (++tries >= 10) clearInterval(tmr); }, 100); } catch (e) { }
       if (musicSource === 'bili' && biliFloat && biliVideo) {
@@ -388,7 +420,7 @@ window.addEventListener('DOMContentLoaded', () => {
     try {
       const le = document.getElementById('lyrics'); if (le) le.textContent = '';
       if (lyricsLoading) lyricsLoading.style.display = 'flex';
-      const r = await window.lowbarAPI.pluginCall('radio.music', 'fetchKuwoLyrics', [id, true]);
+      const r = await window.lowbarAPI.pluginCall('music-radio', 'fetchKuwoLyrics', [id, true]);
       const data = r && r.result ? r.result : r;
       if (!data || !data.ok || !data.dataBase64) return;
       const bin = atob(String(data.dataBase64 || ''));
@@ -404,7 +436,7 @@ window.addEventListener('DOMContentLoaded', () => {
     try {
       const le = document.getElementById('lyrics'); if (le) le.textContent = '';
       if (lyricsLoading) lyricsLoading.style.display = 'flex';
-      const r = await window.lowbarAPI.pluginCall('radio.music', 'fetchBiliLyrics', [bvid, cid]);
+      const r = await window.lowbarAPI.pluginCall('music-radio', 'fetchBiliLyrics', [bvid, cid]);
       const data = r && r.result ? r.result : r;
       if (!data || !data.ok || !data.content) return;
       const yrc = parseLrcToYrc(data.content);
@@ -619,14 +651,12 @@ function mountYrc2_pair(yrc) {
     }
     audio.addEventListener('timeupdate', update);
   }
-  function mountYrc2(yrc) { const el = document.getElementById('lyrics'); if (!el) return; el.innerHTML = ''; const AUTO_SCROLL_PAUSE_MS = 4000; const sorted = Array.isArray(yrc) ? yrc.slice().sort((a, b) => (parseInt(a.t || 0, 10) || 0) - (parseInt(b.t || 0, 10) || 0)) : []; function makeRow(line, kind) { const row = document.createElement('div'); row.className = 'row ' + kind; row.style.whiteSpace = 'normal'; row.style.opacity = '0.9'; line.c.forEach((w, i) => { const s = document.createElement('span'); s.textContent = w.tx; s.dataset.t = w.t; s.dataset.d = w.d; s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; s.style.opacity = '0.55'; s.style.display = 'inline'; row.appendChild(s); const next = line.c[i + 1]; if (next && needSpace(w.tx, next.tx)) row.appendChild(document.createTextNode(' ')); }); return row; } const CLUSTER_MS = 600; let i = 0; while (i < sorted.length) { const start = parseInt(sorted[i].t || 0, 10) || 0; const cluster = []; let j = i; while (j < sorted.length) { const tt = parseInt(sorted[j].t || 0, 10) || 0; if (tt - start <= CLUSTER_MS) { cluster.push(sorted[j]); j++; } else break; } let origin = cluster[0]; let trans = null; if (cluster.length >= 2) { const types = cluster.map(l => ({ l, cjk: l.c.some(w => isCJK(w.tx)), lat: l.c.some(w => hasLatin(w.tx)) })); const nonCjk = types.find(x => !x.cjk && x.lat); const cjk = types.find(x => x.cjk); if (nonCjk && cjk) { origin = nonCjk.l; trans = cjk.l; } else { origin = cluster[0]; trans = cluster[1]; } } const c = document.createElement('div'); c.className = 'line'; c.dataset.t = String(origin.t); let dmax = parseInt(origin.d || '0', 10) || 0; if (trans) dmax = Math.max(dmax, parseInt(trans.d || '0', 10) || 0); c.dataset.d = String(dmax); const r1 = makeRow(origin, 'origin'); c.appendChild(r1); if (trans) { const r2 = makeRow(trans, 'trans'); r2.style.marginTop = '2px'; c.appendChild(r2); } else { c.classList.add('single'); } c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch (e) { } }; el.appendChild(c); const leftovers = cluster.filter(l => l !== origin && l !== trans); leftovers.forEach((ln) => { const sc = document.createElement('div'); sc.className = 'line single'; sc.dataset.t = String(ln.t); sc.dataset.d = String(parseInt(ln.d || '0', 10) || 0); const r = makeRow(ln, 'origin'); sc.appendChild(r); sc.onclick = () => { try { audio.currentTime = (parseInt(sc.dataset.t || '0', 10)) / 1000; } catch (e) { } }; el.appendChild(sc); }); i = j; } let userScrollTs = 0; let touchStartY = 0; el.addEventListener('wheel', () => { userScrollTs = Date.now(); }); el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } }); el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } }); function update() { const t = audio.currentTime * 1000; const lines = Array.from(el.querySelectorAll('.line')); let active = null; for (let k = 0; k < lines.length; k++) { const c = lines[k]; const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); if (t >= lt && t < lt + ld) { active = c; break; } } lines.forEach((c) => { const rows = c.querySelectorAll('.row'); const isActive = (c === active); rows.forEach((row) => { row.style.opacity = isActive ? '1' : '0.7'; const spans = row.querySelectorAll('span'); spans.forEach((s) => { const st = parseInt(s.dataset.t || '0', 10); const sd = parseInt(s.dataset.d || '0', 10); const se = st + sd; if (isActive && t >= st && t < se) { s.style.opacity = '1'; } else if (isActive && t >= se) { s.style.opacity = '1'; } else { s.style.opacity = '0.5'; } }); }); }); if (active && (Date.now() - userScrollTs > AUTO_SCROLL_PAUSE_MS)) { const rect = active.getBoundingClientRect(); const mid = rect.top + (rect.height / 2); const viewMid = window.innerHeight * 0.42; const dy = mid - viewMid; try { el.scrollTo({ top: el.scrollTop + dy, behavior: 'smooth' }); } catch (e) { el.scrollTop += dy; } } } audio.addEventListener('timeupdate', update); }
-  function mountYrc(yrc) { const el = document.getElementById('lyrics'); if (!el) return; el.innerHTML = ''; yrc.forEach((line) => { const c = document.createElement('div'); c.className = 'line'; c.dataset.t = line.t; c.dataset.d = line.d; const row = document.createElement('div'); row.style.whiteSpace = 'normal'; row.style.opacity = '0.9'; line.c.forEach((w, i) => { const s = document.createElement('span'); s.textContent = w.tx; s.dataset.t = w.t; s.dataset.d = w.d; s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; s.style.opacity = '0.55'; s.style.display = 'inline'; row.appendChild(s); if (i < line.c.length - 1) row.appendChild(document.createTextNode(' ')); }); c.appendChild(row); c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch (e) { } }; el.appendChild(c); }); let userScrollTs = 0; let touchStartY = 0; el.addEventListener('wheel', () => { userScrollTs = Date.now(); }); el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } }); el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } }); function update() { const t = audio.currentTime * 1000; const lines = Array.from(el.querySelectorAll('.line')); let active = null; for (let i = 0; i < lines.length; i++) { const c = lines[i]; const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); if (t >= lt && t < lt + ld) { active = c; break; } } lines.forEach((c) => { const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); const row = c.firstChild; const isActive = (c === active); row.style.opacity = isActive ? '1' : '0.7'; const spans = row.querySelectorAll('span'); spans.forEach((s) => { const st = parseInt(s.dataset.t || '0', 10); const sd = parseInt(s.dataset.d || '0', 10); const se = st + sd; if (isActive && t >= st && t < se) { s.style.opacity = '1'; } else if (isActive && t >= se) { s.style.opacity = '1'; } else { s.style.opacity = '0.5'; } }); }); if (active && (Date.now() - userScrollTs > 250)) { const rect = active.getBoundingClientRect(); const mid = rect.top + (rect.height / 2); const viewMid = (window.innerHeight / 2); const dy = mid - viewMid; const el2 = document.getElementById('lyrics'); el2.scrollTop += dy; } } audio.addEventListener('timeupdate', update); }
   if (musicId && musicSource === 'kuwo') renderLyricsForKuwo(musicId);
   else if (musicId && musicSource === 'bili') renderLyricsForBili(musicId, params.get('cid'));
   function formatTime(sec) { if (!sec) return '0:00'; const s = Math.floor(sec); const m = Math.floor(s / 60); const r = s % 60; return `${m}:${String(r).padStart(2, '0')}`; }
   const progressCurrent = document.getElementById('progressCurrent');
   const progressDuration = document.getElementById('progressDuration');
-  async function getSystemNow(){ try { const r = await window.lowbarAPI.pluginCall('radio.music', 'getVariable', ['timeISO']); const d = r && r.result ? r.result : r; const iso = typeof d === 'string' ? d : (d && d.value ? d.value : ''); const t = iso ? Date.parse(iso) : Date.now(); return new Date(t); } catch (e) { return new Date(); } }
+  async function getSystemNow(){ try { const r = await window.lowbarAPI.pluginCall('music-radio', 'getVariable', ['timeISO']); const d = r && r.result ? r.result : r; const iso = typeof d === 'string' ? d : (d && d.value ? d.value : ''); const t = iso ? Date.parse(iso) : Date.now(); return new Date(t); } catch (e) { return new Date(); } }
   function updateProgress() { if (!audio || !audio.duration) return; const pct = (audio.currentTime / audio.duration); progress.style.width = `${pct * 100}%`; progressDot.style.left = `${pct * 100}%`; if (progressCurrent) progressCurrent.textContent = formatTime(audio.currentTime); if (progressDuration) progressDuration.textContent = formatTime(audio.duration); }
   audio.addEventListener('timeupdate', updateProgress);
   audio.addEventListener('loadedmetadata', updateProgress);
@@ -634,9 +664,12 @@ function mountYrc2_pair(yrc) {
   audio.addEventListener('waiting', () => { if (songLoading) songLoading.style.display = 'flex'; });
   audio.addEventListener('play', () => { if (biliVideo && musicSource === 'bili') { try { biliVideo.play(); } catch (e) { } } });
   audio.addEventListener('pause', () => { if (biliVideo && musicSource === 'bili') { try { biliVideo.pause(); } catch (e) { } } });
-  audio.addEventListener('play', () => { setRotatePlayState(true); });
-  audio.addEventListener('pause', () => { setRotatePlayState(false); });
-  audio.addEventListener('ended', () => { setRotatePlayState(false); });
+  audio.addEventListener('play', () => { setRotatePlayState(true); updatePlaybackState(); });
+  audio.addEventListener('pause', () => { setRotatePlayState(false); updatePlaybackState(); });
+  audio.addEventListener('ended', () => { setRotatePlayState(false); updatePlaybackState(); });
+  audio.addEventListener('seeked', updatePlaybackState);
+  audio.addEventListener('ratechange', updatePlaybackState);
+  audio.addEventListener('durationchange', updatePlaybackState);
   audio.addEventListener('timeupdate', () => { if (biliVideo && musicSource === 'bili') { try { const dt = Math.abs((biliVideo.currentTime||0) - (audio.currentTime||0)); if (dt > 0.5) biliVideo.currentTime = audio.currentTime; } catch (e) { } } });
   if (biliCollapseBtn) biliCollapseBtn.onclick = () => { setBiliMode(biliMode === 'hidden' ? 'float' : 'hidden'); };
   if (biliExpandBtn) biliExpandBtn.onclick = () => { setBiliMode(biliMode === 'expand' ? 'float' : 'expand'); };
@@ -652,10 +685,10 @@ function mountYrc2_pair(yrc) {
     window.addEventListener('touchmove', (e) => { if (isDragging && e.touches && e.touches.length) { seekByClientX(e.touches[0].clientX); } });
     window.addEventListener('touchend', () => { isDragging = false; });
   }
-  audio.addEventListener('ended', async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'nextTrack', ['ended']); } catch (e) { } });
+  audio.addEventListener('ended', async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'nextTrack', ['ended']); } catch (e) { } });
   async function loadPlaylist() {
     try {
-      const r = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []);
+      const r = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []);
       const data = r && r.result ? r.result : r;
       const listEl = document.getElementById('playlist');
       const totalEl = document.getElementById('playlistTotal');
@@ -678,27 +711,30 @@ function mountYrc2_pair(yrc) {
             e.preventDefault();
             const idx = Array.prototype.indexOf.call(listEl.children, row);
             if (idx >= 0) {
-              try { await window.lowbarAPI.pluginCall('radio.music', 'removeIndex', [idx]); } catch (e) {}
+              try { await window.lowbarAPI.pluginCall('music-radio', 'removeIndex', [idx]); } catch (e) {}
             }
           });
           listEl.dataset.ctxBound = '1';
         }
       } catch (e) {}
-      data.items.forEach((it, idx) => { const row = document.createElement('div'); row.className = 'item'; const name = document.createElement('div'); name.textContent = `${it.title || ''}`; const dur = document.createElement('div'); dur.textContent = fmt(it.duration || 0); row.appendChild(name); row.appendChild(dur); if (idx === data.currentIndex) row.classList.add('active'); row.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'playIndex', [idx]); } catch (e) { } }; let pressTimer = null; row.addEventListener('mousedown', () => { pressTimer = setTimeout(async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'removeIndex', [idx]); } catch (e) { } }, 600); }); row.addEventListener('mouseup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); row.addEventListener('mouseleave', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); listEl.appendChild(row); }); try { const tt = document.getElementById('playlistTotalText'); if (tt) tt.textContent = `总时长：${fmt(data.totalSecs || 0)}`; } catch (e) { } try { const finEl = document.getElementById('playlistFinish'); if (finEl) { const startIdx = Math.max(0, data.currentIndex || 0); const remainList = Array.isArray(data.items) ? data.items.slice(startIdx) : []; const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const dt = new Date(Date.now() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } } catch (e) { } if (empty) empty.style.display = (data.items.length === 0) ? 'flex' : 'none'; if (!musicUrl && data.items.length > 0) { const last = data.items[data.items.length - 1]; try { if (last) { document.getElementById('audioCover').src = last.cover || ''; document.getElementById('audioTitle').textContent = last.title || ''; document.getElementById('audioArtist').textContent = last.artist || ''; } } catch (e) { } }
+      data.items.forEach((it, idx) => { const row = document.createElement('div'); row.className = 'item'; const name = document.createElement('div'); name.textContent = `${it.title || ''}`; const dur = document.createElement('div'); dur.textContent = fmt(it.duration || 0); row.appendChild(name); row.appendChild(dur); if (idx === data.currentIndex) row.classList.add('active'); row.onclick = async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'playIndex', [idx]); } catch (e) { } }; let pressTimer = null; row.addEventListener('mousedown', () => { pressTimer = setTimeout(async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'removeIndex', [idx]); } catch (e) { } }, 600); }); row.addEventListener('mouseup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); row.addEventListener('mouseleave', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }); listEl.appendChild(row); }); try { const tt = document.getElementById('playlistTotalText'); if (tt) tt.textContent = `总时长：${fmt(data.totalSecs || 0)}`; } catch (e) { } try { const finEl = document.getElementById('playlistFinish'); if (finEl) { const startIdx = Math.max(0, data.currentIndex || 0); const remainList = Array.isArray(data.items) ? data.items.slice(startIdx) : []; const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const dt = new Date(Date.now() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } } catch (e) { } if (empty) empty.style.display = (data.items.length === 0) ? 'flex' : 'none'; if (!musicUrl && data.items.length > 0) { const last = data.items[data.items.length - 1]; try { if (last) { document.getElementById('audioCover').src = last.cover || ''; document.getElementById('audioTitle').textContent = last.title || ''; document.getElementById('audioArtist').textContent = last.artist || ''; } } catch (e) { } }
+      if (listEl.dataset.ctxBound === '1') {
+        // re-bind removal logic for right click if needed, but we used global handler above
+      }
     } catch (e) { }
   }
   let lastFinishUpdateTs = 0;
-  async function updateFinishEstimate() { try { const finEl = document.getElementById('playlistFinish'); if (!finEl) return; if (Date.now() - lastFinishUpdateTs < 3000) return; lastFinishUpdateTs = Date.now(); const r = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []); const data = r && r.result ? r.result : r; if (!data || !Array.isArray(data.items)) return; const startIdx = Math.max(0, data.currentIndex || 0); const remainList = data.items.slice(startIdx); const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const base = await getSystemNow(); const dt = new Date(base.getTime() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } catch (e) { } }
+  async function updateFinishEstimate() { try { const finEl = document.getElementById('playlistFinish'); if (!finEl) return; if (Date.now() - lastFinishUpdateTs < 3000) return; lastFinishUpdateTs = Date.now(); const r = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []); const data = r && r.result ? r.result : r; if (!data || !Array.isArray(data.items)) return; const startIdx = Math.max(0, data.currentIndex || 0); const remainList = data.items.slice(startIdx); const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const base = await getSystemNow(); const dt = new Date(base.getTime() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } catch (e) { } }
   try { audio.addEventListener('timeupdate', updateFinishEstimate); } catch (e) { }
   loadPlaylist();
-  try { const ch = new URL(location.href).searchParams.get('channel'); if (ch) { window.lowbarAPI.subscribe?.(ch); window.lowbarAPI.onEvent?.((name, payload) => { if (name === ch && payload && payload.type === 'update') { if (payload.target === 'playlist') { loadPlaylist(); try { applyBackgroundCurrent(); } catch (e) {} (async () => { try { const r2 = await window.lowbarAPI.pluginCall('radio.music', 'getPlaylist', []); const d2 = r2 && r2.result ? r2.result : r2; if (d2 && Array.isArray(d2.items) && d2.currentIndex >= 0) { const cur = d2.items[d2.currentIndex]; const le = document.getElementById('lyrics'); if (cur && cur.id && cur.source === 'kuwo') { await renderLyricsForKuwo(cur.id); } else if (cur && cur.id && cur.source === 'bili') { await renderLyricsForBili(cur.id, cur.cid); } else { if (le) le.textContent = ''; } } } catch (e) { } })(); } else if (payload.target === 'songLoading') { try { const x = document.getElementById('songLoading'); if (x) x.style.display = (payload.value === 'show') ? 'flex' : 'none'; } catch (e) { } } else if (payload.target === 'bgModePanel') { try { if (!bgModePanel) return; const v = String(payload.value||''); if (v === 'toggle') { const cur = bgModePanel.style.display; bgModePanel.style.display = (!cur || cur==='none') ? 'flex' : 'none'; } else if (v === 'show') bgModePanel.style.display = 'flex'; else if (v === 'hide') bgModePanel.style.display = 'none'; } catch (e) {} } else if (payload.target === 'bgModeApply') { try { applyBackgroundCurrent(); spectrumEnabled = (String(localStorage.getItem('radio.spectrum.enabled')||'1') !== '0'); if (spectrumCanvas) { spectrumCanvas.style.display = spectrumEnabled ? '' : 'none'; try { spectrumCanvas.width = spectrumCanvas.clientWidth; spectrumCanvas.height = spectrumCanvas.clientHeight; } catch (e) {} } updateFullscreenStyles(); } catch (e) {} } } }); } } catch (e) { }
-  try { const toggle = document.getElementById('removeAfterPlay'); async function initToggle() { try { const r = await window.lowbarAPI.pluginCall('radio.music', 'getSettings', []); const d = r && r.result ? r.result : r; const cur = !!(d && d.settings && d.settings.removeAfterPlay); if (toggle) toggle.checked = cur; } catch (e) { } } function persistLocal() { try { if (toggle) localStorage.setItem('radio.removeAfterPlay', toggle.checked ? '1' : '0'); } catch (e) { } } if (toggle) { initToggle(); toggle.addEventListener('change', async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'setRemoveAfterPlay', [toggle.checked]); persistLocal(); } catch (e) { } }); } } catch (e) { }
-  try { const addBtn = document.getElementById('playlistAddBtn'); if (addBtn) addBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'onLowbarEvent', [{ type: 'click', id: 'tab-search' }]); } catch (e) { } }; } catch (e) { }
+  try { const ch = new URL(location.href).searchParams.get('channel'); if (ch) { window.lowbarAPI.subscribe?.(ch); window.lowbarAPI.onEvent?.((name, payload) => { if (name === ch && payload && payload.type === 'update') { if (payload.target === 'playlist') { loadPlaylist(); try { applyBackgroundCurrent(); } catch (e) {} (async () => { try { const r2 = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []); const d2 = r2 && r2.result ? r2.result : r2; if (d2 && Array.isArray(d2.items) && d2.currentIndex >= 0) { const cur = d2.items[d2.currentIndex]; const le = document.getElementById('lyrics'); if (cur && cur.id && cur.source === 'kuwo') { await renderLyricsForKuwo(cur.id); } else if (cur && cur.id && cur.source === 'bili') { await renderLyricsForBili(cur.id, cur.cid); } else { if (le) le.textContent = ''; } } } catch (e) { } })(); } else if (payload.target === 'songLoading') { try { const x = document.getElementById('songLoading'); if (x) x.style.display = (payload.value === 'show') ? 'flex' : 'none'; } catch (e) { } } else if (payload.target === 'bgModePanel') { try { if (!bgModePanel) return; const v = String(payload.value||''); if (v === 'toggle') { const cur = bgModePanel.style.display; bgModePanel.style.display = (!cur || cur==='none') ? 'flex' : 'none'; } else if (v === 'show') bgModePanel.style.display = 'flex'; else if (v === 'hide') bgModePanel.style.display = 'none'; } catch (e) {} } else if (payload.target === 'bgModeApply') { try { applyBackgroundCurrent(); spectrumEnabled = (String(localStorage.getItem('radio.spectrum.enabled')||'1') !== '0'); if (spectrumCanvas) { spectrumCanvas.style.display = spectrumEnabled ? '' : 'none'; try { spectrumCanvas.width = spectrumCanvas.clientWidth; spectrumCanvas.height = spectrumCanvas.clientHeight; } catch (e) {} } updateFullscreenStyles(); } catch (e) {} } } }); } } catch (e) { }
+  try { const toggle = document.getElementById('removeAfterPlay'); async function initToggle() { try { const r = await window.lowbarAPI.pluginCall('music-radio', 'getSettings', []); const d = r && r.result ? r.result : r; const cur = !!(d && d.settings && d.settings.removeAfterPlay); if (toggle) toggle.checked = cur; } catch (e) { } } function persistLocal() { try { if (toggle) localStorage.setItem('radio.removeAfterPlay', toggle.checked ? '1' : '0'); } catch (e) { } } if (toggle) { initToggle(); toggle.addEventListener('change', async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'setRemoveAfterPlay', [toggle.checked]); persistLocal(); } catch (e) { } }); } } catch (e) { }
+  try { const addBtn = document.getElementById('playlistAddBtn'); if (addBtn) addBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'onLowbarEvent', [{ type: 'click', id: 'tab-search' }]); } catch (e) { } }; } catch (e) { }
   const prevBtn = document.getElementById('audioPrevBtn');
   const nextBtn = document.getElementById('audioNextBtn');
   const playBtn = document.getElementById('audioPlayBtn');
-  if (prevBtn) prevBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'prevTrack', []); } catch (e) { } };
-  if (nextBtn) nextBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('radio.music', 'nextTrack', ['manual']); } catch (e) { } };
+  if (prevBtn) prevBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'prevTrack', []); } catch (e) { } };
+  if (nextBtn) nextBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'nextTrack', ['manual']); } catch (e) { } };
   if (playBtn) { playBtn.onclick = () => { try { if (audio.paused) { audio.play(); playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; } else { audio.pause(); playBtn.innerHTML = '<i class="ri-play-fill"></i>'; } } catch (e) { } }; audio.addEventListener('play', () => { playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; }); audio.addEventListener('pause', () => { playBtn.innerHTML = '<i class="ri-play-fill"></i>'; }); }
   try { audio.addEventListener('play', updateFullscreenStyles); } catch (e) { }
 });

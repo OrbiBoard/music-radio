@@ -46,8 +46,72 @@
     let loading = false;
     let searchSeq = 0;
     let openMenu = null;
+    let cachedSettings = {};
+    let cachedPlaylist = { totalSecs: 0, items: [] };
+
+    // Update caches
+    async function updateCaches() {
+      try {
+        const r1 = await window.lowbarAPI.pluginCall('music-radio', 'getSettings', []);
+        cachedSettings = (r1 && r1.result ? r1.result.settings : (r1 && r1.settings ? r1.settings : {})) || {};
+        const r2 = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []);
+        cachedPlaylist = (r2 && r2.result ? r2.result : r2) || { totalSecs: 0, items: [] };
+        
+        // Also need current system time from backend? 
+        // We can use local time if system time is synced. Assuming local time is fine.
+        // But playlist progress is relative to server start?
+        // Actually, we need to know remaining time of CURRENT song to be precise.
+        // But totalSecs includes full duration of all songs.
+        // If music is playing, we should subtract elapsed time of current song.
+        // But for estimation, totalSecs is usually enough or we assume current song just started or ignore elapsed.
+        // Let's stick to totalSecs for simplicity or improve if needed.
+        // Actually, getPlaylist returns totalSecs of ALL songs.
+        // If we want "remaining time", we need to subtract played part.
+        // Let's assume totalSecs is sum of durations.
+        // To be precise: Remaining = Sum(Duration of i >= currentIndex) - CurrentTime.
+        // For now let's just use cachedPlaylist info.
+      } catch (e) {}
+    }
+
     function renderItems(items){
       const r = document.getElementById('result');
+      // Update caches once per render batch? Or rely on periodic updates?
+      // Better to use latest data when rendering.
+      
+      const now = new Date();
+      let endTimeDate = null;
+      if (cachedSettings.endTime) {
+        const parts = cachedSettings.endTime.split(':');
+        if (parts.length === 2) {
+          endTimeDate = new Date(now);
+          endTimeDate.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
+          // If endTime is earlier than now? User said "When earlier than this time".
+          // Wait, "When earlier than this time" -> "当时间早于该时间时". 
+          // Means: If Now < EndTime.
+          // Example: Set 23:00. Now is 22:00. If adding song makes it 23:05, show warning.
+          // If Now is 23:01, don't show.
+        }
+      }
+
+      // Calculate current playlist finish time
+      // We need to estimate remaining time.
+      // We can use a rough estimate: cachedPlaylist.totalSecs - (current song elapsed?).
+      // Let's just use totalSecs.
+      // Wait, totalSecs is sum of all durations.
+      // If we are at index 5, previous 4 are done.
+      // We should sum from currentIndex.
+      let remainingSecs = 0;
+      if (cachedPlaylist.items && cachedPlaylist.currentIndex >= 0) {
+          for (let i = cachedPlaylist.currentIndex; i < cachedPlaylist.items.length; i++) {
+              remainingSecs += Number(cachedPlaylist.items[i].duration || 0);
+          }
+          // We don't have current progress here easily without polling player.
+          // Let's ignore progress for now, or maybe fetch it?
+          // It's acceptable to be slightly off (by current song progress).
+      } else {
+          remainingSecs = cachedPlaylist.totalSecs || 0;
+      }
+
       for (const it of items) {
         const el = document.createElement('div'); el.className = 'item';
         const img = document.createElement('img'); img.src = it.cover || '';
@@ -58,13 +122,33 @@
         el.appendChild(img); el.appendChild(meta);
         const menu = document.createElement('div'); menu.className = 'menu';
         const actions = document.createElement('div'); actions.className = 'actions';
+        
+        // Warning logic
+        let warnEl = null;
+        if (endTimeDate && now < endTimeDate) {
+            const songDur = Number(it.duration || 0);
+            const predictedFinish = new Date(now.getTime() + (remainingSecs + songDur) * 1000);
+            if (predictedFinish > endTimeDate) {
+                warnEl = document.createElement('span');
+                warnEl.style.color = '#ff4d4f';
+                warnEl.style.fontSize = '12px';
+                warnEl.style.marginRight = '8px';
+                warnEl.style.display = 'flex';
+                warnEl.style.alignItems = 'center';
+                const finishStr = `${String(predictedFinish.getHours()).padStart(2,'0')}:${String(predictedFinish.getMinutes()).padStart(2,'0')}`;
+                warnEl.innerHTML = `<i class="ri-alarm-warning-line" style="margin-right:2px"></i> 预计 ${finishStr} 完播`;
+            }
+        }
+
         const mTail = document.createElement('button'); mTail.innerHTML = '<i class="ri-play-list-2-line"></i> 插入到歌单尾部';
         const mPlay = document.createElement('button'); mPlay.innerHTML = '<i class="ri-play-fill"></i> 立即播放';
         const mNext = document.createElement('button'); mNext.innerHTML = '<i class="ri-skip-forward-fill"></i> 下一首播放';
-        function hideFloating(){ try { window.lowbarAPI.emitEvent('radio.music', { type:'update', target:'floatingUrl', value: null }); } catch (e) {} }
-        mTail.onclick = async (e) => { e.stopPropagation(); await window.lowbarAPI.pluginCall('radio.music', 'enqueueTail', [it]); hideFloating(); };
-        mPlay.onclick = async (e) => { e.stopPropagation(); const r = await window.lowbarAPI.pluginCall('radio.music', 'playNow', [it]); if (!(r && (r.result ? r.result.ok : r.ok))) alert('播放失败'); hideFloating(); };
-        mNext.onclick = async (e) => { e.stopPropagation(); await window.lowbarAPI.pluginCall('radio.music', 'enqueueNext', [it]); hideFloating(); };
+        function hideFloating(){ try { window.lowbarAPI.emitEvent('music-radio', { type:'update', target:'floatingUrl', value: null }); } catch (e) {} }
+        mTail.onclick = async (e) => { e.stopPropagation(); hideFloating(); await window.lowbarAPI.pluginCall('music-radio', 'enqueueTail', [it]); };
+        mPlay.onclick = async (e) => { e.stopPropagation(); hideFloating(); const r = await window.lowbarAPI.pluginCall('music-radio', 'playNow', [it]); if (!(r && (r.result ? r.result.ok : r.ok))) alert('播放失败'); };
+        mNext.onclick = async (e) => { e.stopPropagation(); hideFloating(); await window.lowbarAPI.pluginCall('music-radio', 'enqueueNext', [it]); };
+        
+        if (warnEl) actions.appendChild(warnEl);
         actions.appendChild(mTail); actions.appendChild(mPlay); actions.appendChild(mNext);
         menu.appendChild(actions);
         const ctrl = document.createElement('div'); ctrl.className = 'controls';
@@ -84,6 +168,8 @@
     async function loadPage(append){
       if (loading) return;
       loading = true;
+      // Fetch caches before rendering
+      await updateCaches(); 
       const r = document.getElementById('result');
       const btn = document.getElementById('loadmore');
       const pageInfo = document.getElementById('pageinfo');
@@ -94,7 +180,7 @@
       if (sbtn) sbtn.disabled = true;
       if (lbar) { lbar.style.display = 'flex'; }
       const method = currentSource === 'bili' ? 'searchBili' : 'searchKuwo';
-      const res = await window.lowbarAPI.pluginCall('radio.music', method, [currentQuery, currentPage]);
+      const res = await window.lowbarAPI.pluginCall('music-radio', method, [currentQuery, currentPage]);
       const data = res && res.result ? res.result : res;
       if (!data || data.ok === false) {
         if (!append) r.textContent = '搜索失败';

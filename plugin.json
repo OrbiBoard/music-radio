@@ -1,5 +1,6 @@
 {
-  "id": "radio.music",
+  "id": "music-radio",
+  "aliases": ["radio.music"],
   "name": "音乐电台",
   "version": "0.1.0",
   "author": "OrbiBoard",

@@ -61,7 +61,7 @@
       const shineGroup = document.getElementById('shineGroup');
       function read(k, def){ try { const v = localStorage.getItem(k); return v===null||v===undefined ? def : v; } catch (e) { return def; } }
       function write(k, v){ try { localStorage.setItem(k, String(v)); } catch (e) {} }
-      function emitApply(){ try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'update', target:'bgModeApply', value:'apply' }]); } catch (e) {} }
+      function emitApply(){ try { window.lowbarAPI.pluginCall('music-radio','onLowbarEvent',[{ type:'update', target:'bgModeApply', value:'apply' }]); } catch (e) {} }
       function updateGroupVis(){
         const mode = String(bgModeEl.value||'blur');
         blurGroup.style.display = (mode === 'blur') ? 'block' : 'none';

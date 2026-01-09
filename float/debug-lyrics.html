@@ -107,12 +107,12 @@
       async function preview(){
         status.textContent = '加载中...';
         try {
-          const rr = await window.lowbarAPI.pluginCall('radio.music','getPlaylist',[]);
+          const rr = await window.lowbarAPI.pluginCall('music-radio','getPlaylist',[]);
           const d = rr && rr.result ? rr.result : rr;
           if (!d || !Array.isArray(d.items) || d.currentIndex<0){ status.textContent='无当前曲目'; return; }
           const cur = d.items[d.currentIndex];
           if (!cur || cur.source!=='kuwo' || !cur.id){ status.textContent='当前曲目非酷我源或缺少ID'; return; }
-          const r = await window.lowbarAPI.pluginCall('radio.music','fetchKuwoLyrics',[cur.id,true]);
+          const r = await window.lowbarAPI.pluginCall('music-radio','fetchKuwoLyrics',[cur.id,true]);
           const data = r && r.result ? r.result : r;
           if (!data || !data.ok || !data.dataBase64){ status.textContent='歌词获取失败'; return; }
           const bin = atob(String(data.dataBase64||'')); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
@@ -127,7 +127,7 @@
       function apply(){
         write('radio.lyric.pair.ms', pairMsEl.value||'600');
         write('radio.lyric.back.ms', backMsEl.value||'300');
-        try { window.lowbarAPI.pluginCall('radio.music','onLowbarEvent',[{ type:'update', target:'lyricsPairApply', value:'apply' }]); } catch (e) {}
+        try { window.lowbarAPI.pluginCall('music-radio','onLowbarEvent',[{ type:'update', target:'lyricsPairApply', value:'apply' }]); } catch (e) {}
         status.textContent = '已应用到背景';
       }
       function init(){

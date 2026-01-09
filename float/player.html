@@ -21,7 +21,7 @@
   <script>
     window.state = { coreUrl: null, lyricUrl: null, coreStyleUrl: null, importMap: null };
     (async function setup(){
-      const res = await window.lowbarAPI.pluginCall('radio.music', 'getAmlEntryUrls', []);
+      const res = await window.lowbarAPI.pluginCall('music-radio', 'getAmlEntryUrls', []);
       if (res && res.ok) {
         window.state.coreUrl = res.coreUrl; window.state.lyricUrl = res.lyricUrl; window.state.coreStyleUrl = res.coreStyleUrl; window.state.importMap = res.importMap || {};
         if (window.state.importMap && typeof window.state.importMap === 'object') {

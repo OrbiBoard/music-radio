@@ -3,7 +3,7 @@ const url = require('url');
 let pluginApi = null;
 
 const state = {
-  eventChannel: 'radio.music',
+  eventChannel: 'music-radio',
   pages: {
     recommend: '',
     search: '',
@@ -16,7 +16,7 @@ const state = {
   currentFloatingUrl: null,
   playlist: [],
   currentIndex: -1,
-  settings: { removeAfterPlay: true }
+  settings: { removeAfterPlay: true, endTime: '' }
 };
 
 const functions = {
@@ -36,7 +36,7 @@ const functions = {
         icon: 'ri-radio-line',
         eventChannel: state.eventChannel,
         subscribeTopics: [state.eventChannel],
-        callerPluginId: 'radio.music',
+        callerPluginId: 'music-radio',
         width: 1680,
         height: 960,
         floatingSizePercent: 60,
@@ -70,7 +70,7 @@ const functions = {
           const cur = state.playlist[state.currentIndex];
           const g = await functions.getPlayUrl(cur, 'standard');
           if (g && g.ok && g.url) {
-            await functions.setBackgroundMusic({ music: g.url, album: cur.cover, title: cur.title, artist: cur.artist, id: cur.id, source: cur.source || 'kuwo' });
+            await functions.setBackgroundMusic({ music: g.url, album: cur.cover, albumName: cur.album, title: cur.title, artist: cur.artist, id: cur.id, source: cur.source || 'kuwo' });
           }
         }
       } catch (e) {}
@@ -329,12 +329,13 @@ const functions = {
       return { ok: false, error: e?.message || String(e) };
     }
   },
-  setBackgroundMusic: async ({ music, album, title, artist, id, source }) => {
+  setBackgroundMusic: async ({ music, album, albumName, title, artist, id, source }) => {
     try {
       const bgFile = path.join(__dirname, 'background', 'player.html');
       const u = new url.URL(url.pathToFileURL(bgFile).href);
       if (music) u.searchParams.set('music', String(music));
       if (album) u.searchParams.set('album', String(album));
+      if (albumName) u.searchParams.set('albumName', String(albumName));
       if (title) u.searchParams.set('title', String(title));
       if (artist) u.searchParams.set('artist', String(artist));
       if (id) u.searchParams.set('id', String(id));
@@ -364,7 +365,7 @@ const functions = {
       if (wasEmpty) {
         state.currentIndex = 0;
         const g = await functions.getPlayUrl(it, 'standard');
-        if (g && g.ok && g.url) await functions.setBackgroundMusic({ music: g.url, album: it.cover, title: it.title, artist: it.artist, id: it.id, source: it.source });
+        if (g && g.ok && g.url) await functions.setBackgroundMusic({ music: g.url, album: it.cover, albumName: it.album, title: it.title, artist: it.artist, id: it.id, source: it.source });
       }
       pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
       return { ok: true, length: state.playlist.length };
@@ -390,7 +391,7 @@ const functions = {
         state.playlist.push(it);
         state.currentIndex = 0;
         const g = await functions.getPlayUrl(it, 'standard');
-        if (g && g.ok && g.url) await functions.setBackgroundMusic({ music: g.url, album: it.cover, title: it.title, artist: it.artist, id: it.id, source: it.source });
+        if (g && g.ok && g.url) await functions.setBackgroundMusic({ music: g.url, album: it.cover, albumName: it.album, title: it.title, artist: it.artist, id: it.id, source: it.source });
         pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
         return { ok: true, length: state.playlist.length, pos: 0 };
       } else {
@@ -423,7 +424,7 @@ const functions = {
       pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
       const g = await functions.getPlayUrl(meta, 'standard');
       if (!g || !g.ok || !g.url) return { ok: false, error: g?.error || 'resolve failed' };
-      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
+      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, albumName: meta.album, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
@@ -445,7 +446,7 @@ const functions = {
       const meta = state.playlist[nextIdx];
       const g = await functions.getPlayUrl(meta, 'standard');
       if (!g || !g.ok || !g.url) return { ok: false, error: g?.error || 'resolve failed' };
-      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
+      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, albumName: meta.album, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
@@ -459,7 +460,7 @@ const functions = {
       const meta = state.playlist[prevIdx];
       const g = await functions.getPlayUrl(meta, 'standard');
       if (!g || !g.ok || !g.url) return { ok: false, error: g?.error || 'resolve failed' };
-      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
+      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, albumName: meta.album, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
@@ -475,6 +476,10 @@ const functions = {
   },
   setRemoveAfterPlay: async (flag = false) => {
     try { state.settings.removeAfterPlay = !!flag; return { ok: true, value: state.settings.removeAfterPlay }; }
+    catch (e) { return { ok: false, error: e?.message || String(e) }; }
+  },
+  setEndTime: async (timeStr = '') => {
+    try { state.settings.endTime = String(timeStr || ''); return { ok: true, value: state.settings.endTime }; }
     catch (e) { return { ok: false, error: e?.message || String(e) }; }
   },
   getSettings: async () => {
@@ -557,7 +562,7 @@ const functions = {
       const meta = state.playlist[i];
       const g = await functions.getPlayUrl(meta, 'standard');
       if (!g || !g.ok || !g.url) return { ok: false, error: g?.error || 'resolve failed' };
-      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
+      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, albumName: meta.album, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };

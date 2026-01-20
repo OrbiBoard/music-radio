@@ -16,16 +16,176 @@ const state = {
   currentFloatingUrl: null,
   playlist: [],
   currentIndex: -1,
-  settings: { removeAfterPlay: true, endTime: '' }
+  settings: { removeAfterPlay: true, endTime: '', download: { dir: '', format: '{t} - {a}', lrc: true } },
+  downloads: []
 };
 
 const functions = {
+  selectDirectory: async () => {
+    try {
+      const electron = require('electron');
+      const dialog = electron.dialog;
+      const BrowserWindow = electron.BrowserWindow;
+      const win = BrowserWindow.getFocusedWindow();
+      const result = await dialog.showOpenDialog(win, {
+        properties: ['openDirectory', 'createDirectory']
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { ok: false, canceled: true };
+      }
+      return { ok: true, path: result.filePaths[0] };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  },
+  getDownloadSettings: async () => {
+    try {
+      const home = require('os').homedir();
+      const defaultDir = require('path').join(home, 'Downloads', 'OrbiMusic');
+      if (!state.settings.download) state.settings.download = { dir: defaultDir, format: '{t} - {a}', lrc: true };
+      if (!state.settings.download.dir) state.settings.download.dir = defaultDir;
+      return { ok: true, settings: state.settings.download };
+    } catch (e) { return { ok: false, error: e?.message || String(e) }; }
+  },
+  setDownloadSettings: async (settings = {}) => {
+    try {
+      if (!state.settings.download) state.settings.download = {};
+      if (typeof settings.dir === 'string') state.settings.download.dir = settings.dir;
+      if (typeof settings.format === 'string') state.settings.download.format = settings.format;
+      if (typeof settings.lrc === 'boolean') state.settings.download.lrc = settings.lrc;
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e?.message || String(e) }; }
+  },
+  getDownloads: async () => {
+    return { ok: true, items: state.downloads };
+  },
+  downloadSong: async (item = {}) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const https = require('https');
+      const http = require('http');
+      
+      const home = require('os').homedir();
+      const defaultDir = path.join(home, 'Downloads', 'OrbiMusic');
+      const conf = state.settings.download || { dir: defaultDir, format: '{t} - {a}', lrc: true };
+      const dir = conf.dir || defaultDir;
+      const format = conf.format || '{t} - {a}';
+      const saveLrc = !!conf.lrc;
+      
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      
+      const title = String(item.title || '未知标题').replace(/[\\/:*?"<>|]/g, '_');
+      const artist = String(item.artist || '未知艺术家').replace(/[\\/:*?"<>|]/g, '_');
+      const album = String(item.album || '').replace(/[\\/:*?"<>|]/g, '_');
+      
+      let baseName = format.replace(/\{t\}/g, title).replace(/\{n\}/g, title).replace(/\{a\}/g, artist).replace(/\{l\}/g, album);
+      if (!baseName) baseName = `${title} - ${artist}`;
+      baseName = baseName.replace(/[\\/:*?"<>|]/g, '_');
+      
+      const taskId = Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+      const task = { id: taskId, title: item.title, status: 'pending', progress: 0 };
+      state.downloads.unshift(task);
+      if (state.downloads.length > 20) state.downloads.pop();
+      pluginApi.emit(state.eventChannel, { type: 'update', target: 'downloadList', value: state.downloads });
+      
+      (async () => {
+        try {
+          task.status = 'downloading';
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'downloadList', value: state.downloads });
+          
+          // Get Audio URL
+          const g = await functions.getPlayUrl(item, 'standard');
+          if (!g || !g.ok || !g.url || !g.url.startsWith('http')) throw new Error('无法获取音频链接');
+          
+          const audioPath = path.join(dir, `${baseName}.mp3`); // Assuming mp3 or check header? Kuwo usually mp3/aac. Let's save as mp3 for now or detect.
+          // Or just save as is.
+          // Check extension from url?
+          let ext = '.mp3';
+          if (g.url.includes('.flac')) ext = '.flac';
+          else if (g.url.includes('.m4a')) ext = '.m4a';
+          else if (g.url.includes('.aac')) ext = '.aac';
+          
+          const finalPath = path.join(dir, `${baseName}${ext}`);
+          const file = fs.createWriteStream(finalPath);
+          
+          await new Promise((resolve, reject) => {
+            const lib = g.url.startsWith('https') ? https : http;
+            lib.get(g.url, (res) => {
+              if (res.statusCode !== 200) { reject(new Error(`Status ${res.statusCode}`)); return; }
+              const total = parseInt(res.headers['content-length'] || '0', 10);
+              let loaded = 0;
+              res.on('data', (chunk) => {
+                loaded += chunk.length;
+                if (total > 0) {
+                  const pct = Math.floor((loaded / total) * 100);
+                  if (pct !== task.progress) {
+                    task.progress = pct;
+                    pluginApi.emit(state.eventChannel, { type: 'update', target: 'downloadList', value: state.downloads });
+                  }
+                }
+              });
+              res.pipe(file);
+              file.on('finish', () => {
+                file.close(resolve);
+              });
+              file.on('error', (err) => {
+                fs.unlink(finalPath, () => {});
+                reject(err);
+              });
+            }).on('error', reject);
+          });
+          
+          // Download Lyrics
+          if (saveLrc && item.source === 'kuwo') {
+             try {
+               const id = String(item.id).replace('MUSIC_', '');
+               const lrcRes = await new Promise((resolve, reject) => {
+                 https.get(`https://api.limeasy.cn/kwmpro/lyric/?id=${encodeURIComponent(id)}`, (res) => {
+                   const chunks = [];
+                   res.on('data', c => chunks.push(c));
+                   res.on('end', () => {
+                     try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve(null); }
+                   });
+                 }).on('error', () => resolve(null));
+               });
+               
+               if (lrcRes && lrcRes.jlx === 1 && lrcRes.lyrics && Array.isArray(lrcRes.lyrics.data)) {
+                 const lrcContent = lrcRes.lyrics.data.map(line => {
+                   const minutes = Math.floor(line.time / 60000).toString().padStart(2, '0');
+                   const seconds = ((line.time % 60000) / 1000).toFixed(2).padStart(5, '0');
+                   return `[${minutes}:${seconds}]${line.text}`;
+                 }).join('\n');
+                 if (lrcContent) {
+                   fs.writeFileSync(path.join(dir, `${baseName}.lrc`), lrcContent);
+                 }
+               }
+             } catch (e) { console.error('LRC Download error', e); }
+          }
+          
+          task.status = 'completed';
+          task.progress = 100;
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'downloadList', value: state.downloads });
+          
+        } catch (e) {
+          task.status = 'failed';
+          task.error = e.message;
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'downloadList', value: state.downloads });
+        }
+      })();
+      
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  },
   openRadio: async (_params = {}) => {
     try {
       const bgFile = path.join(__dirname, 'background', 'player.html');
       const recFile = path.join(__dirname, 'float', 'recommend.html');
       const searchFile = path.join(__dirname, 'float', 'search.html');
       const settingsFile = path.join(__dirname, 'float', 'settings.html');
+      const downloadFile = path.join(__dirname, 'float', 'download.html');
       const playerFile = path.join(__dirname, 'float', 'player.html');
       const bgSettingsFile = path.join(__dirname, 'float', 'bg-settings.html');
       const debugLyricsFile = path.join(__dirname, 'float', 'debug-lyrics.html');
@@ -48,7 +208,8 @@ const functions = {
           // { id: 'tab-about', text: '关于', icon: 'ri-information-line' }
         ],
         leftItems: [
-          { id: 'btn-settings', text: '设置', icon: 'ri-settings-3-line' }
+          { id: 'btn-settings', text: '设置', icon: 'ri-settings-3-line' },
+          { id: 'btn-download', text: '下载', icon: 'ri-download-line' }
         ],
         backgroundUrl: url.pathToFileURL(bgFile).href,
         floatingUrl: null,
@@ -58,6 +219,7 @@ const functions = {
       state.pages.recommend = url.pathToFileURL(recFile).href;
       state.pages.search = url.pathToFileURL(searchFile).href;
       state.pages.settings = url.pathToFileURL(settingsFile).href;
+      state.pages.download = url.pathToFileURL(downloadFile).href;
       state.pages.player = url.pathToFileURL(playerFile).href;
       state.pages.bgSettings = url.pathToFileURL(bgSettingsFile).href;
       state.pages.debugLyrics = url.pathToFileURL(debugLyricsFile).href;
@@ -349,6 +511,7 @@ const functions = {
   },
   enqueueTail: async (item = {}) => {
     try {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const it = {
         id: String(item.id||''),
         title: String(item.title||''),
@@ -359,7 +522,10 @@ const functions = {
         source: String(item.source||'kuwo'),
         cid: String(item.cid||'')
       };
-      if (!it.id) return { ok: false, error: 'invalid item' };
+      if (!it.id) {
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        return { ok: false, error: 'invalid item' };
+      }
       const wasEmpty = state.playlist.length === 0 || state.currentIndex < 0;
       state.playlist.push(it);
       if (wasEmpty) {
@@ -368,13 +534,16 @@ const functions = {
         if (g && g.ok && g.url) await functions.setBackgroundMusic({ music: g.url, album: it.cover, albumName: it.album, title: it.title, artist: it.artist, id: it.id, source: it.source });
       }
       pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: true, length: state.playlist.length };
     } catch (e) {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: false, error: e?.message || String(e) };
     }
   },
   enqueueNext: async (item = {}) => {
     try {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const it = {
         id: String(item.id||''),
         title: String(item.title||''),
@@ -385,7 +554,10 @@ const functions = {
         source: String(item.source||'kuwo'),
         cid: String(item.cid||'')
       };
-      if (!it.id) return { ok: false, error: 'invalid item' };
+      if (!it.id) {
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        return { ok: false, error: 'invalid item' };
+      }
       const wasEmpty = state.playlist.length === 0 || state.currentIndex < 0;
       if (wasEmpty) {
         state.playlist.push(it);
@@ -393,19 +565,23 @@ const functions = {
         const g = await functions.getPlayUrl(it, 'standard');
         if (g && g.ok && g.url) await functions.setBackgroundMusic({ music: g.url, album: it.cover, albumName: it.album, title: it.title, artist: it.artist, id: it.id, source: it.source });
         pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
         return { ok: true, length: state.playlist.length, pos: 0 };
       } else {
         const pos = state.currentIndex >= 0 ? state.currentIndex + 1 : state.playlist.length;
         state.playlist.splice(pos, 0, it);
         pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
         return { ok: true, length: state.playlist.length, pos };
       }
     } catch (e) {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: false, error: e?.message || String(e) };
     }
   },
   playNow: async (item = {}) => {
     try {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const id = String(item.id||'');
       if (!id) return { ok: false, error: 'invalid item id' };
       const meta = {
@@ -432,6 +608,7 @@ const functions = {
   },
   nextTrack: async (cause = 'manual') => {
     try {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const prevIdx = state.currentIndex;
       let nextIdx = prevIdx >= 0 ? prevIdx + 1 : (state.playlist.length ? 0 : -1);
       const isLast = prevIdx === state.playlist.length - 1;
@@ -454,6 +631,7 @@ const functions = {
   },
   prevTrack: async () => {
     try {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const prevIdx = state.currentIndex > 0 ? state.currentIndex - 1 : -1;
       if (prevIdx < 0 || prevIdx >= state.playlist.length) return { ok: false, error: 'no previous track' };
       state.currentIndex = prevIdx;
@@ -495,6 +673,29 @@ const functions = {
       else if (state.currentIndex > i) state.currentIndex -= 1;
       pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
       return { ok: true, length: state.playlist.length };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  },
+  moveItem: async (fromIdx, toIdx) => {
+    try {
+      const f = Math.floor(Number(fromIdx)||0);
+      const t = Math.floor(Number(toIdx)||0);
+      if (f < 0 || f >= state.playlist.length || t < 0 || t >= state.playlist.length || f === t) return { ok: false };
+      
+      const item = state.playlist[f];
+      state.playlist.splice(f, 1);
+      state.playlist.splice(t, 0, item);
+      
+      if (state.currentIndex === f) {
+        state.currentIndex = t;
+      } else {
+        if (f < state.currentIndex && t >= state.currentIndex) state.currentIndex--;
+        else if (f > state.currentIndex && t <= state.currentIndex) state.currentIndex++;
+      }
+      
+      pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+      return { ok: true };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
     }
@@ -556,6 +757,7 @@ const functions = {
   },
   playIndex: async (idx = 0) => {
     try {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const i = Math.floor(Number(idx)||0);
       if (i < 0 || i >= state.playlist.length) return { ok: false, error: 'index out of range' };
       state.currentIndex = i;
@@ -758,6 +960,11 @@ const functions = {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 720, height: 520 } });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.settings });
           state.currentFloatingUrl = state.pages.settings;
+        } else if (payload.id === 'btn-download') {
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 640, height: 480 } });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.download });
+          state.currentFloatingUrl = state.pages.download;
         } else if (payload.id === 'tab-about') {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 640, height: 400 } });

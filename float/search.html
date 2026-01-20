@@ -143,13 +143,15 @@
         const mTail = document.createElement('button'); mTail.innerHTML = '<i class="ri-play-list-2-line"></i> 插入到歌单尾部';
         const mPlay = document.createElement('button'); mPlay.innerHTML = '<i class="ri-play-fill"></i> 立即播放';
         const mNext = document.createElement('button'); mNext.innerHTML = '<i class="ri-skip-forward-fill"></i> 下一首播放';
+        const mDownload = document.createElement('button'); mDownload.innerHTML = '<i class="ri-download-line"></i> 下载歌曲';
         function hideFloating(){ try { window.lowbarAPI.emitEvent('music-radio', { type:'update', target:'floatingUrl', value: null }); } catch (e) {} }
         mTail.onclick = async (e) => { e.stopPropagation(); hideFloating(); await window.lowbarAPI.pluginCall('music-radio', 'enqueueTail', [it]); };
         mPlay.onclick = async (e) => { e.stopPropagation(); hideFloating(); const r = await window.lowbarAPI.pluginCall('music-radio', 'playNow', [it]); if (!(r && (r.result ? r.result.ok : r.ok))) alert('播放失败'); };
         mNext.onclick = async (e) => { e.stopPropagation(); hideFloating(); await window.lowbarAPI.pluginCall('music-radio', 'enqueueNext', [it]); };
+        mDownload.onclick = async (e) => { e.stopPropagation(); if(confirm(`确认下载 "${it.title}" 吗？`)) { await window.lowbarAPI.pluginCall('music-radio', 'downloadSong', [it]); } };
         
         if (warnEl) actions.appendChild(warnEl);
-        actions.appendChild(mTail); actions.appendChild(mPlay); actions.appendChild(mNext);
+        actions.appendChild(mTail); actions.appendChild(mPlay); actions.appendChild(mNext); actions.appendChild(mDownload);
         menu.appendChild(actions);
         const ctrl = document.createElement('div'); ctrl.className = 'controls';
         const btnExpand = document.createElement('button'); btnExpand.innerHTML = '<i class="ri-arrow-down-s-line"></i> 展开';

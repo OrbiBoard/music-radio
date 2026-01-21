@@ -1,11 +1,7 @@
-# music-radio 插件
+# 音乐电台 (music-radio)
 
-该仓库包含 OrbiBoard 主程序的 music-radio 插件源码。
+## 简介
+提供音乐播放、搜索、推荐等功能的音乐电台插件。
 
-用法
-- 将本目录作为独立 Git 仓库管理。
-- 依赖请在 `plugin.json` 的 `npmDependencies` 或 `dependencies` 中声明，由主程序在运行时通过插件依赖管理安装。
-
-开发
-- 页面入口：`background/*` 与 `float/*`
-- 后端入口：`index.js`
+## 功能
+- **打开音乐电台**: 启动音乐播放器界面。

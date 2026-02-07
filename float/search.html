@@ -3,42 +3,118 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
   <title>搜索</title>
   <link rel="stylesheet" href="../../../renderer/remixicon-local.css" />
   <style>
-    html, body { height: 100%; margin: 0; background: #181818; color: #e6e6e6; font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; user-select: none; -webkit-user-select: none; -ms-user-select: none; }
+    :root {
+      --bg: #181818;
+      --fg: #e6e6e6;
+      --muted: #a0a0a0;
+      --border: #2a2a2a;
+      --input-bg: #101010;
+      --item-hover: #202020;
+      --accent: #6ab4ff;
+      --btn-bg: #202020;
+      --scroll-thumb: #2e2e2e;
+      --scroll-track: #151515;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; user-select: none; -webkit-user-select: none; -ms-user-select: none; transition: background 0.3s, color 0.3s; }
     .wrap { height: 100%; display: flex; flex-direction: column; }
-    header { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid #2a2a2a; }
+    header { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid var(--border); }
     .content { padding: 16px; display: flex; gap: 8px; }
-    input { flex: 1; padding: 10px 12px; border-radius: 6px; border: 1px solid #2a2a2a; background: #101010; color: #e6e6e6; }
-    input:focus { outline: none; box-shadow: none; border-color: #3a3a3a; }
-    button { padding: 10px 16px; border-radius: 6px; border: 1px solid #2a2a2a; background: #202020; color: #e6e6e6; cursor: pointer; }
-    button:focus { outline: none; box-shadow: none; border-color: #3a3a3a; }
+    input { flex: 1; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--input-bg); color: var(--fg); }
+    input:focus { outline: none; box-shadow: none; border-color: var(--accent); }
+    select { padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:var(--input-bg); color:var(--fg); }
+    button { padding: 10px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--btn-bg); color: var(--fg); cursor: pointer; transition: all 0.2s; }
+    button:focus { outline: none; box-shadow: none; border-color: var(--accent); }
+    button:hover { filter: brightness(1.2); }
     .scroll { flex: 1; overflow: auto; }
     .scroll::-webkit-scrollbar { width: 10px; }
-    .scroll::-webkit-scrollbar-track { background: #151515; }
-    .scroll::-webkit-scrollbar-thumb { background: #2e2e2e; border-radius: 6px; border: 2px solid #151515; }
-    .result { padding: 8px 16px; color: #a0a0a0; display:flex; flex-direction:column; gap:8px; }
-    .item { display:flex; gap:12px; align-items:flex-start; padding:12px; border:1px solid #2a2a2a; border-radius:8px; cursor:pointer; margin-bottom:10px; }
-    .item:hover { background:#202020; }
+    .scroll::-webkit-scrollbar-track { background: var(--scroll-track); }
+    .scroll::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 6px; border: 2px solid var(--scroll-track); }
+    .result { padding: 8px 16px; color: var(--muted); display:flex; flex-direction:column; gap:8px; }
+    .item { display:flex; gap:12px; align-items:flex-start; padding:12px; border:1px solid var(--border); border-radius:8px; cursor:pointer; margin-bottom:10px; transition: background 0.2s; }
+    .item:hover { background:var(--item-hover); border-color: var(--accent); }
     .item img { width:56px; height:56px; object-fit:cover; border-radius:6px; }
     .item .meta { display:flex; flex-direction:column; }
-    .item .meta .title { color:#e6e6e6; }
-    .item .meta .artist { color:#9a9a9a; font-size:12px; }
+    .item .meta .title { color:var(--fg); }
+    .item .meta .artist { color:var(--muted); font-size:12px; }
     .controls { display:flex; gap:8px; margin-left:auto; }
-    .controls button { padding:6px 10px; font-size:12px; border-radius:6px; border:1px solid #2a2a2a; background:transparent; color:#e6e6e6; cursor:pointer; }
-    .controls i { margin-right:6px; color:#c0c0c0; }
-    .menu { margin: -6px 16px 10px 72px; padding:8px; border:1px dashed #2a2a2a; border-radius:8px; display:none; background:#1a1a1a; }
+    .controls button { padding:6px 10px; font-size:12px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--fg); cursor:pointer; }
+    .controls i { margin-right:6px; color:var(--muted); }
+    .menu { margin: -6px 16px 10px 72px; padding:8px; border:1px dashed var(--border); border-radius:8px; display:none; background:var(--bg); }
     .menu .actions { display:flex; gap:10px; }
-    .menu .actions button { padding:6px 10px; font-size:12px; border-radius:6px; border:1px solid #2a2a2a; background:#262626; color:#e6e6e6; cursor:pointer; }
-    .menu .actions i { margin-right:6px; color:#c0c0c0; }
-    .loadingbar { display:none; padding: 8px 16px; color:#9ad; align-items:center; gap:8px; }
+    .menu .actions button { padding:6px 10px; font-size:12px; border-radius:6px; border:1px solid var(--border); background:var(--item-hover); color:var(--fg); cursor:pointer; }
+    .menu .actions i { margin-right:6px; color:var(--muted); }
+    .loadingbar { display:none; padding: 8px 16px; color:var(--accent); align-items:center; gap:8px; }
     .loadingbar i { font-size:16px; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .spin { animation: spin 1s linear infinite; }
-    .tip { padding: 0 16px 4px 16px; color:#9a9a9a; font-size:12px; }
+    .tip { padding: 0 16px 4px 16px; color:var(--muted); font-size:12px; }
   </style>
   <script>
+    // 注入主题逻辑
+    window.applyTheme = (mode, color) => {
+      const root = document.documentElement;
+      const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      
+      const accent = color || '#6ab4ff';
+      root.style.setProperty('--accent', accent);
+      
+      if (isDark) {
+        root.style.setProperty('--bg', '#181818');
+        root.style.setProperty('--fg', '#e6e6e6');
+        root.style.setProperty('--muted', '#a0a0a0');
+        root.style.setProperty('--border', '#2a2a2a');
+        root.style.setProperty('--input-bg', '#101010');
+        root.style.setProperty('--item-hover', '#202020');
+        root.style.setProperty('--btn-bg', '#202020');
+        root.style.setProperty('--scroll-thumb', '#2e2e2e');
+        root.style.setProperty('--scroll-track', '#151515');
+      } else {
+        root.style.setProperty('--bg', '#ffffff');
+        root.style.setProperty('--fg', '#333333');
+        root.style.setProperty('--muted', '#666666');
+        root.style.setProperty('--border', '#e0e0e0');
+        root.style.setProperty('--input-bg', '#f5f5f5');
+        root.style.setProperty('--item-hover', '#f0f0f0');
+        root.style.setProperty('--btn-bg', '#f5f5f5');
+        root.style.setProperty('--scroll-thumb', '#cccccc');
+        root.style.setProperty('--scroll-track', '#f0f0f0');
+      }
+    };
+
+    (async () => {
+      try {
+        if (window.lowbarAPI?.configGet) {
+          const mode = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+          const color = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+          window.applyTheme(mode, color);
+        }
+        
+        if (window.lowbarAPI?.onConfigChanged) {
+          window.lowbarAPI.onConfigChanged(({ scope, key, value }) => {
+            if (scope === 'system') {
+               (async () => {
+                 const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+                 const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+                 window.applyTheme(m, c);
+               })();
+            }
+          });
+        }
+        
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async () => {
+           const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+           if (m === 'system') {
+              const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+              window.applyTheme('system', c);
+           }
+        });
+      } catch (e) { console.error('Theme init failed', e); }
+    })();
+
     let currentPage = 0;
     let currentQuery = '';
     let currentSource = 'kuwo';
@@ -56,28 +132,11 @@
         cachedSettings = (r1 && r1.result ? r1.result.settings : (r1 && r1.settings ? r1.settings : {})) || {};
         const r2 = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []);
         cachedPlaylist = (r2 && r2.result ? r2.result : r2) || { totalSecs: 0, items: [] };
-        
-        // Also need current system time from backend? 
-        // We can use local time if system time is synced. Assuming local time is fine.
-        // But playlist progress is relative to server start?
-        // Actually, we need to know remaining time of CURRENT song to be precise.
-        // But totalSecs includes full duration of all songs.
-        // If music is playing, we should subtract elapsed time of current song.
-        // But for estimation, totalSecs is usually enough or we assume current song just started or ignore elapsed.
-        // Let's stick to totalSecs for simplicity or improve if needed.
-        // Actually, getPlaylist returns totalSecs of ALL songs.
-        // If we want "remaining time", we need to subtract played part.
-        // Let's assume totalSecs is sum of durations.
-        // To be precise: Remaining = Sum(Duration of i >= currentIndex) - CurrentTime.
-        // For now let's just use cachedPlaylist info.
       } catch (e) {}
     }
 
     function renderItems(items){
       const r = document.getElementById('result');
-      // Update caches once per render batch? Or rely on periodic updates?
-      // Better to use latest data when rendering.
-      
       const now = new Date();
       let endTimeDate = null;
       if (cachedSettings.endTime) {
@@ -85,29 +144,14 @@
         if (parts.length === 2) {
           endTimeDate = new Date(now);
           endTimeDate.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
-          // If endTime is earlier than now? User said "When earlier than this time".
-          // Wait, "When earlier than this time" -> "当时间早于该时间时". 
-          // Means: If Now < EndTime.
-          // Example: Set 23:00. Now is 22:00. If adding song makes it 23:05, show warning.
-          // If Now is 23:01, don't show.
         }
       }
 
-      // Calculate current playlist finish time
-      // We need to estimate remaining time.
-      // We can use a rough estimate: cachedPlaylist.totalSecs - (current song elapsed?).
-      // Let's just use totalSecs.
-      // Wait, totalSecs is sum of all durations.
-      // If we are at index 5, previous 4 are done.
-      // We should sum from currentIndex.
       let remainingSecs = 0;
       if (cachedPlaylist.items && cachedPlaylist.currentIndex >= 0) {
           for (let i = cachedPlaylist.currentIndex; i < cachedPlaylist.items.length; i++) {
               remainingSecs += Number(cachedPlaylist.items[i].duration || 0);
           }
-          // We don't have current progress here easily without polling player.
-          // Let's ignore progress for now, or maybe fetch it?
-          // It's acceptable to be slightly off (by current song progress).
       } else {
           remainingSecs = cachedPlaylist.totalSecs || 0;
       }
@@ -181,8 +225,9 @@
       btn.disabled = true;
       if (sbtn) sbtn.disabled = true;
       if (lbar) { lbar.style.display = 'flex'; }
-      const method = currentSource === 'bili' ? 'searchBili' : 'searchKuwo';
-      const res = await window.lowbarAPI.pluginCall('music-radio', method, [currentQuery, currentPage]);
+      
+      const res = await window.lowbarAPI.pluginCall('music-radio', 'search', [currentQuery, currentPage, currentSource]);
+      
       const data = res && res.result ? res.result : res;
       if (!data || data.ok === false) {
         if (!append) r.textContent = '搜索失败';
@@ -233,14 +278,41 @@
       await loadPage(false);
       if (seq !== searchSeq) return;
     }
-    function initSourceSwitch(){
+    
+    async function initSources(){
       const sel = document.getElementById('source');
-      if (sel) {
-        sel.value = currentSource;
-        sel.addEventListener('change', () => { currentSource = sel.value || 'kuwo'; });
-      }
+      if (!sel) return;
+      try {
+          // Wait a bit for backend to register sources?
+          // Retry a few times
+          let sources = [];
+          for (let i=0; i<3; i++) {
+              const res = await window.lowbarAPI.pluginCall('music-radio', 'getAudioSources', []);
+              const data = (res && res.result) ? res.result : res;
+              if (data && data.ok && Array.isArray(data.sources) && data.sources.length > 0) {
+                  sources = data.sources;
+                  break;
+              }
+              await new Promise(r => setTimeout(r, 500));
+          }
+          
+          if (sources.length > 0) {
+              sel.innerHTML = '';
+              sources.forEach(s => {
+                  const opt = document.createElement('option');
+                  opt.value = s.id;
+                  opt.textContent = s.name;
+                  sel.appendChild(opt);
+              });
+              if (sources.find(s => s.id === 'kuwo')) currentSource = 'kuwo';
+              else currentSource = sources[0].id;
+              sel.value = currentSource;
+          }
+      } catch (e) { console.error('Failed to load sources', e); }
+      sel.addEventListener('change', () => { currentSource = sel.value; });
     }
-    window.addEventListener('DOMContentLoaded', initSourceSwitch);
+
+    window.addEventListener('DOMContentLoaded', initSources);
     window.addEventListener('DOMContentLoaded', () => { const iq = document.getElementById('q'); if (iq) { iq.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); }); try { iq.focus(); } catch (e) {} } });
   </script>
 </head>
@@ -249,9 +321,8 @@
     <header>搜索歌曲</header>
     <div class="content">
       <input id="q" placeholder="输入歌名/艺术家" />
-      <select id="source" style="padding:10px 12px;border-radius:6px;border:1px solid #2a2a2a;background:#101010;color:#e6e6e6;">
-        <option value="kuwo">酷我</option>
-        <option value="bili">Bilibili</option>
+      <select id="source">
+        <option value="kuwo">默认源</option>
       </select>
       <button id="searchbtn" onclick="doSearch()"><i class="ri-search-line"></i> 搜索</button>
     </div>

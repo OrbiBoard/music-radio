@@ -6,24 +6,42 @@
   <title>下载管理</title>
   <link rel="stylesheet" href="../../../renderer/remixicon-local.css" />
   <style>
-    html, body { height: 100%; margin: 0; background: #181818; color: #e6e6e6; font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; }
+    :root {
+      --bg: #181818;
+      --fg: #e6e6e6;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --input-bg: #202020;
+      --btn-bg: #2a2a2a;
+      --btn-hover: #333;
+      --accent: #6ab4ff;
+      --success: #5b8;
+      --error: #f55;
+      --downloading: #9ad;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; transition: background 0.3s, color 0.3s; }
     .wrap { height: 100%; display: flex; flex-direction: column; }
-    header { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid #2a2a2a; display: flex; align-items: center; justify-content: space-between; }
+    header { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
     .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    .settings { padding: 16px; border-bottom: 1px solid #2a2a2a; }
+    .settings { padding: 16px; border-bottom: 1px solid var(--border); }
     .settings-row { display: flex; align-items: center; margin-bottom: 12px; gap: 10px; font-size: 13px; }
     .settings-row:last-child { margin-bottom: 0; }
-    input[type="text"] { flex: 1; background: #202020; border: 1px solid #333; color: #eee; padding: 6px 10px; border-radius: 4px; font-size: 12px; }
+    input[type="text"] { flex: 1; background: var(--input-bg); border: 1px solid var(--btn-hover); color: var(--fg); padding: 6px 10px; border-radius: 4px; font-size: 12px; }
     input[type="checkbox"] { margin: 0; }
-    button { padding: 6px 12px; border-radius: 4px; border: 1px solid #333; background: #2a2a2a; color: #eee; cursor: pointer; font-size: 12px; }
-    button:hover { background: #333; }
+    button { padding: 6px 12px; border-radius: 4px; border: 1px solid var(--btn-hover); background: var(--btn-bg); color: var(--fg); cursor: pointer; font-size: 12px; transition: all 0.2s; }
+    button:hover { background: var(--btn-hover); filter: brightness(1.1); }
     .list { flex: 1; overflow-y: auto; padding: 0; }
-    .item { padding: 10px 16px; border-bottom: 1px solid #222; display: flex; align-items: center; gap: 12px; }
+    .item { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
     .item .info { flex: 1; min-width: 0; }
-    .item .title { font-size: 13px; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .item .status { font-size: 11px; color: #888; margin-top: 2px; }
-    .item .progress { width: 60px; text-align: right; font-size: 12px; color: #aaa; }
-    .empty { padding: 40px; text-align: center; color: #555; font-size: 13px; }
+    .item .title { font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item .status { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .item .progress { width: 60px; text-align: right; font-size: 12px; color: var(--muted); }
+    .empty { padding: 40px; text-align: center; color: var(--muted); font-size: 13px; }
+    
+    /* Scrollbar */
+    .list::-webkit-scrollbar { width: 8px; }
+    .list::-webkit-scrollbar-track { background: transparent; }
+    .list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
   </style>
 </head>
 <body>
@@ -59,6 +77,63 @@
     </div>
   </div>
   <script>
+    // 注入主题逻辑
+    window.applyTheme = (mode, color) => {
+      const root = document.documentElement;
+      const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      
+      const accent = color || '#6ab4ff';
+      root.style.setProperty('--accent', accent);
+      
+      if (isDark) {
+        root.style.setProperty('--bg', '#181818');
+        root.style.setProperty('--fg', '#e6e6e6');
+        root.style.setProperty('--muted', '#aaa');
+        root.style.setProperty('--border', '#2a2a2a');
+        root.style.setProperty('--input-bg', '#202020');
+        root.style.setProperty('--btn-bg', '#2a2a2a');
+        root.style.setProperty('--btn-hover', '#333');
+      } else {
+        root.style.setProperty('--bg', '#ffffff');
+        root.style.setProperty('--fg', '#333333');
+        root.style.setProperty('--muted', '#666666');
+        root.style.setProperty('--border', '#e0e0e0');
+        root.style.setProperty('--input-bg', '#f5f5f5');
+        root.style.setProperty('--btn-bg', '#f5f5f5');
+        root.style.setProperty('--btn-hover', '#e0e0e0');
+      }
+    };
+
+    (async () => {
+      try {
+        if (window.lowbarAPI?.configGet) {
+          const mode = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+          const color = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+          window.applyTheme(mode, color);
+        }
+        
+        if (window.lowbarAPI?.onConfigChanged) {
+          window.lowbarAPI.onConfigChanged(({ scope, key, value }) => {
+            if (scope === 'system') {
+               (async () => {
+                 const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+                 const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+                 window.applyTheme(m, c);
+               })();
+            }
+          });
+        }
+        
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async () => {
+           const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+           if (m === 'system') {
+              const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+              window.applyTheme('system', c);
+           }
+        });
+      } catch (e) { console.error('Theme init failed', e); }
+    })();
+
     const listEl = document.getElementById('list');
     const dirInput = document.getElementById('dlDir');
     const browseBtn = document.getElementById('browseBtn');
@@ -100,9 +175,9 @@
         div.className = 'item';
         let statusText = '等待中';
         let color = '#888';
-        if (it.status === 'downloading') { statusText = '下载中...'; color = '#9ad'; }
-        else if (it.status === 'completed') { statusText = '已完成'; color = '#5b8'; }
-        else if (it.status === 'failed') { statusText = '失败: ' + (it.error || '未知错误'); color = '#f55'; }
+        if (it.status === 'downloading') { statusText = '下载中...'; color = 'var(--downloading)'; }
+        else if (it.status === 'completed') { statusText = '已完成'; color = 'var(--success)'; }
+        else if (it.status === 'failed') { statusText = '失败: ' + (it.error || '未知错误'); color = 'var(--error)'; }
         
         div.innerHTML = `
           <div class="info">

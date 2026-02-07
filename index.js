@@ -1,5 +1,6 @@
 const path = require('path');
 const url = require('url');
+const fs = require('fs');
 let pluginApi = null;
 
 const state = {
@@ -11,13 +12,124 @@ const state = {
     about: '',
     player: '',
     bgSettings: '',
-    debugLyrics: ''
+    debugLyrics: '',
+    discovery: '',
+    playlist: '',
+    history: ''
   },
   currentFloatingUrl: null,
   playlist: [],
+  dailyHistory: [], // Items for the current day
+  playCounts: {}, // { songId: count }
+  today: '',
+  dataPath: path.join(__dirname, 'data'),
   currentIndex: -1,
-  settings: { removeAfterPlay: true, endTime: '', download: { dir: '', format: '{t} - {a}', lrc: true } },
-  downloads: []
+  tempPlaylist: null,
+  settings: { removeAfterPlay: true, playMode: 'sequence', endTime: '', pauseAtEndTime: false, download: { dir: '', format: '{t} - {a}', lrc: true } },
+  downloads: [],
+  sources: new Map(),
+  timerTriggered: false
+};
+
+const ensureDataDir = () => {
+  if (!fs.existsSync(state.dataPath)) fs.mkdirSync(state.dataPath, { recursive: true });
+};
+
+const loadData = () => {
+  try {
+    ensureDataDir();
+    // Settings
+    const setFile = path.join(state.dataPath, 'settings.json');
+    if (fs.existsSync(setFile)) {
+        try { 
+            const saved = JSON.parse(fs.readFileSync(setFile, 'utf8'));
+            state.settings = { ...state.settings, ...saved };
+            // Ensure deep merge for download object
+            if (saved.download) state.settings.download = { ...state.settings.download, ...saved.download };
+        } catch(e){}
+    }
+
+    // Play Counts
+    const pcFile = path.join(state.dataPath, 'play_counts.json');
+    if (fs.existsSync(pcFile)) {
+        try { state.playCounts = JSON.parse(fs.readFileSync(pcFile, 'utf8')); } catch(e){}
+    }
+    
+    // Check Date
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    state.today = `${y}-${m}-${d}`;
+    
+    // Daily History
+    const histFile = path.join(state.dataPath, `history_${state.today}.json`);
+    if (fs.existsSync(histFile)) {
+        try { state.dailyHistory = JSON.parse(fs.readFileSync(histFile, 'utf8')); } catch(e){}
+    } else {
+        state.dailyHistory = [];
+    }
+    
+    // Active Playlist (Check if it belongs to today)
+    const plFile = path.join(state.dataPath, 'active_playlist.json');
+    if (fs.existsSync(plFile)) {
+        try {
+            const data = JSON.parse(fs.readFileSync(plFile, 'utf8'));
+            if (data.date === state.today) {
+                state.playlist = data.items || [];
+                state.currentIndex = data.currentIndex || -1;
+            } else {
+                // New day, clear active playlist
+                state.playlist = [];
+                state.currentIndex = -1;
+                // Maybe preserve settings?
+            }
+        } catch(e){}
+    }
+  } catch (e) { console.error('Load Data Error', e); }
+};
+
+const saveData = (type) => {
+  try {
+    ensureDataDir();
+    if (type === 'counts') {
+      fs.writeFileSync(path.join(state.dataPath, 'play_counts.json'), JSON.stringify(state.playCounts));
+    } else if (type === 'history') {
+      fs.writeFileSync(path.join(state.dataPath, `history_${state.today}.json`), JSON.stringify(state.dailyHistory));
+    } else if (type === 'playlist') {
+      const data = { date: state.today, items: state.playlist, currentIndex: state.currentIndex };
+      fs.writeFileSync(path.join(state.dataPath, 'active_playlist.json'), JSON.stringify(data));
+    } else if (type === 'settings') {
+      fs.writeFileSync(path.join(state.dataPath, 'settings.json'), JSON.stringify(state.settings));
+    }
+  } catch (e) {}
+};
+
+const addToHistory = (item) => {
+    // Add to daily history if valid
+    if (!item || !item.id) return;
+    
+    // Check date change
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const today = `${y}-${m}-${d}`;
+    
+    if (today !== state.today) {
+        state.today = today;
+        state.dailyHistory = [];
+        try {
+            const histFile = path.join(state.dataPath, `history_${state.today}.json`);
+            if (fs.existsSync(histFile)) {
+                 state.dailyHistory = JSON.parse(fs.readFileSync(histFile, 'utf8'));
+            }
+        } catch(e){}
+    }
+
+    // We append to history log
+    state.dailyHistory.push({ ...item, addedAt: Date.now() });
+    saveData('history');
 };
 
 const functions = {
@@ -47,18 +159,187 @@ const functions = {
       return { ok: true, settings: state.settings.download };
     } catch (e) { return { ok: false, error: e?.message || String(e) }; }
   },
+  getPlayMode: async () => {
+    return { ok: true, mode: state.settings.playMode || 'sequence' };
+  },
+  setPlayMode: async (mode) => {
+    const modes = ['list-loop', 'single-loop', 'sequence', 'random', 'play-once'];
+    if (modes.includes(mode)) {
+        state.settings.playMode = mode;
+        saveData('settings');
+        return { ok: true };
+    }
+    return { ok: false, error: 'invalid mode' };
+  },
   setDownloadSettings: async (settings = {}) => {
     try {
       if (!state.settings.download) state.settings.download = {};
       if (typeof settings.dir === 'string') state.settings.download.dir = settings.dir;
       if (typeof settings.format === 'string') state.settings.download.format = settings.format;
       if (typeof settings.lrc === 'boolean') state.settings.download.lrc = settings.lrc;
+      saveData('settings');
       return { ok: true };
     } catch (e) { return { ok: false, error: e?.message || String(e) }; }
   },
   getDownloads: async () => {
     return { ok: true, items: state.downloads };
   },
+  
+  // Source Registry
+  registerAudioSource: async (id, def) => {
+    state.sources.set(id, def);
+    return { ok: true };
+  },
+  unregisterAudioSource: async (id) => {
+    state.sources.delete(id);
+    return { ok: true };
+  },
+  getAudioSources: async () => {
+    return { ok: true, sources: Array.from(state.sources.entries()).map(([id, def]) => ({ id, name: def.name, discoveryPage: def.discoveryPage })) };
+  },
+  
+  getHistory: async (dateStr) => {
+      try {
+          // If asking for today, return memory state
+          if (!dateStr || dateStr === state.today) {
+              // Return reverse order (newest first)
+              return { ok: true, items: state.dailyHistory.slice().reverse() };
+          }
+          // Load from file
+          const f = path.join(state.dataPath, `history_${dateStr}.json`);
+          if (fs.existsSync(f)) {
+              const items = JSON.parse(fs.readFileSync(f, 'utf8'));
+              return { ok: true, items: items.reverse() };
+          }
+          return { ok: true, items: [] };
+      } catch (e) { return { ok: false, error: e.message }; }
+  },
+  
+  clearHistory: async (dateStr) => {
+      try {
+          if (!dateStr || dateStr === state.today) {
+              state.dailyHistory = [];
+              saveData('history');
+          } else {
+              const f = path.join(state.dataPath, `history_${dateStr}.json`);
+              if (fs.existsSync(f)) fs.unlinkSync(f);
+          }
+          return { ok: true };
+      } catch (e) { return { ok: false, error: e.message }; }
+  },
+
+  deleteFromHistory: async (dateStr, addedAt) => {
+      try {
+          const ts = Number(addedAt);
+          if (!ts) return { ok: false };
+          
+          if (!dateStr || dateStr === state.today) {
+              const idx = state.dailyHistory.findIndex(x => x.addedAt === ts);
+              if (idx >= 0) {
+                  state.dailyHistory.splice(idx, 1);
+                  saveData('history');
+              }
+          } else {
+              const f = path.join(state.dataPath, `history_${dateStr}.json`);
+              if (fs.existsSync(f)) {
+                  let items = JSON.parse(fs.readFileSync(f, 'utf8'));
+                  const idx = items.findIndex(x => x.addedAt === ts);
+                  if (idx >= 0) {
+                      items.splice(idx, 1);
+                      fs.writeFileSync(f, JSON.stringify(items));
+                  }
+              }
+          }
+          return { ok: true };
+      } catch (e) { return { ok: false, error: e.message }; }
+  },
+
+  cancelLoading: async () => {
+      try {
+        pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' });
+        return { ok: true };
+      } catch(e) { return { ok: false }; }
+  },
+  
+  retryLoading: async () => {
+      try {
+        if (state.currentIndex >= 0 && state.currentIndex < state.playlist.length) {
+            const item = state.playlist[state.currentIndex];
+            // Just retry playing
+            await functions.playIndex(state.currentIndex);
+        }
+        return { ok: true };
+      } catch(e) { return { ok: false }; }
+  },
+
+  // Generic Search
+  search: async (query, page, sourceId) => {
+      let sId = sourceId;
+      if (!sId) {
+          if (state.sources.has('kuwo')) sId = 'kuwo';
+          else if (state.sources.size > 0) sId = state.sources.keys().next().value;
+      }
+      
+      const src = state.sources.get(sId);
+      if (!src) return { ok: false, error: 'source not found' };
+      
+      try {
+          const r = await pluginApi.call(src.pluginId, src.methods.search, [query, page]);
+          if (r && r.ok && r.result) return r.result;
+          return r;
+      } catch (e) {
+          return { ok: false, error: e.message };
+      }
+  },
+  
+  getPlayUrl: async (item = {}, quality = 'standard') => {
+      const srcId = item.source || 'kuwo';
+      const src = state.sources.get(srcId);
+      if (!src) return { ok: false, error: 'source not registered' };
+      
+      try {
+          const r = await pluginApi.call(src.pluginId, src.methods.getPlayUrl, [item, quality]);
+          if (r && r.ok && r.result) return r.result;
+          return r;
+      } catch (e) {
+          return { ok: false, error: e.message };
+      }
+  },
+  
+  fetchLyrics: async (item) => {
+      const srcId = item.source || 'kuwo';
+      const src = state.sources.get(srcId);
+      if (!src) return { ok: false, error: 'source not registered' };
+      try {
+          const r = await pluginApi.call(src.pluginId, src.methods.getLyrics, [item]);
+          if (r && r.ok && r.result) return r.result;
+          return r;
+      } catch (e) {
+           return { ok: false, error: e.message };
+      }
+  },
+
+  resolveCover: async (item) => {
+      if (item.cover) return item.cover;
+      const srcId = item.source || 'kuwo';
+      if (srcId !== 'kuwo') return '';
+      try {
+          const src = state.sources.get(srcId);
+          if (src && src.methods.getMusicInfo) {
+              const r = await pluginApi.call(src.pluginId, src.methods.getMusicInfo, [item.id]);
+              if (r && r.ok && r.result && r.result.cover) return r.result.cover;
+          }
+      } catch (e) {}
+      return '';
+  },
+
+  downloadCurrent: async () => {
+      if (state.currentIndex >= 0 && state.currentIndex < state.playlist.length) {
+        return await functions.downloadSong(state.playlist[state.currentIndex]);
+      }
+      return { ok: false, error: 'no music playing' };
+  },
+
   downloadSong: async (item = {}) => {
     try {
       const fs = require('fs');
@@ -98,9 +379,6 @@ const functions = {
           const g = await functions.getPlayUrl(item, 'standard');
           if (!g || !g.ok || !g.url || !g.url.startsWith('http')) throw new Error('无法获取音频链接');
           
-          const audioPath = path.join(dir, `${baseName}.mp3`); // Assuming mp3 or check header? Kuwo usually mp3/aac. Let's save as mp3 for now or detect.
-          // Or just save as is.
-          // Check extension from url?
           let ext = '.mp3';
           if (g.url.includes('.flac')) ext = '.flac';
           else if (g.url.includes('.m4a')) ext = '.m4a';
@@ -137,28 +415,14 @@ const functions = {
           });
           
           // Download Lyrics
-          if (saveLrc && item.source === 'kuwo') {
+          if (saveLrc) {
              try {
-               const id = String(item.id).replace('MUSIC_', '');
-               const lrcRes = await new Promise((resolve, reject) => {
-                 https.get(`https://api.limeasy.cn/kwmpro/lyric/?id=${encodeURIComponent(id)}`, (res) => {
-                   const chunks = [];
-                   res.on('data', c => chunks.push(c));
-                   res.on('end', () => {
-                     try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch(e) { resolve(null); }
-                   });
-                 }).on('error', () => resolve(null));
-               });
-               
-               if (lrcRes && lrcRes.jlx === 1 && lrcRes.lyrics && Array.isArray(lrcRes.lyrics.data)) {
-                 const lrcContent = lrcRes.lyrics.data.map(line => {
-                   const minutes = Math.floor(line.time / 60000).toString().padStart(2, '0');
-                   const seconds = ((line.time % 60000) / 1000).toFixed(2).padStart(5, '0');
-                   return `[${minutes}:${seconds}]${line.text}`;
-                 }).join('\n');
-                 if (lrcContent) {
-                   fs.writeFileSync(path.join(dir, `${baseName}.lrc`), lrcContent);
-                 }
+               const lrcRes = await functions.fetchLyrics(item);
+               if (lrcRes && lrcRes.ok && lrcRes.content) {
+                   fs.writeFileSync(path.join(dir, `${baseName}.lrc`), lrcRes.content);
+               } else if (lrcRes && lrcRes.ok && lrcRes.format === 'lrcx' && lrcRes.dataBase64) {
+                   // Try to save lrcx? or just ignore if we can't decode
+                   // For now ignore complex lyrics in download to keep it simple
                }
              } catch (e) { console.error('LRC Download error', e); }
           }
@@ -179,6 +443,24 @@ const functions = {
       return { ok: false, error: e?.message || String(e) };
     }
   },
+  openPlaylist: async (data) => {
+    try {
+      state.tempPlaylist = data;
+      const playlistFile = path.join(__dirname, 'float', 'playlist.html');
+      state.pages.playlist = url.pathToFileURL(playlistFile).href;
+      
+      pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
+      pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 860, height: 520 } });
+      pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.playlist });
+      state.currentFloatingUrl = state.pages.playlist;
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  },
+  getTempPlaylist: async () => {
+    return { ok: true, data: state.tempPlaylist };
+  },
   openRadio: async (_params = {}) => {
     try {
       const bgFile = path.join(__dirname, 'background', 'player.html');
@@ -190,6 +472,8 @@ const functions = {
       const bgSettingsFile = path.join(__dirname, 'float', 'bg-settings.html');
       const debugLyricsFile = path.join(__dirname, 'float', 'debug-lyrics.html');
       const aboutFile = path.join(__dirname, 'float', 'about.html');
+      const discoveryFile = path.join(__dirname, 'float', 'discovery.html');
+      const historyFile = path.join(__dirname, 'float', 'history.html');
 
       const params = {
         title: '音乐电台',
@@ -203,9 +487,9 @@ const functions = {
         floatingWidth: 860,
         floatingHeight: 520,
         centerItems: [
-          // { id: 'tab-recommend', text: '推荐', icon: 'ri-thumb-up-line' },
-          { id: 'tab-search', text: '搜索', icon: 'ri-search-line' }
-          // { id: 'tab-about', text: '关于', icon: 'ri-information-line' }
+          { id: 'tab-discovery', text: '发现', icon: 'ri-compass-3-line' },
+          { id: 'tab-search', text: '搜索', icon: 'ri-search-line' },
+          { id: 'tab-history', text: '历史', icon: 'ri-history-line' }
         ],
         leftItems: [
           { id: 'btn-settings', text: '设置', icon: 'ri-settings-3-line' },
@@ -224,6 +508,8 @@ const functions = {
       state.pages.bgSettings = url.pathToFileURL(bgSettingsFile).href;
       state.pages.debugLyrics = url.pathToFileURL(debugLyricsFile).href;
       state.pages.about = url.pathToFileURL(aboutFile).href;
+      state.pages.discovery = url.pathToFileURL(discoveryFile).href;
+      state.pages.history = url.pathToFileURL(historyFile).href;
 
       await pluginApi.call('ui.lowbar', 'openTemplate', [params]);
       state.currentFloatingUrl = null;
@@ -241,266 +527,41 @@ const functions = {
       return { ok: false, error: e?.message || String(e) };
     }
   },
-  httpProxy: async (targetUrl = '', options = {}) => {
-    try {
-      const u = String(targetUrl || '').trim();
-      if (!u) return { ok: false, error: 'empty url' };
-      const parsed = new url.URL(u);
-      const wl = new Set(['search.kuwo.cn', 'newlyric.kuwo.cn']);
-      if (!wl.has(parsed.host)) return { ok: false, error: 'domain not allowed' };
-      const http = require('http');
-      const https = require('https');
-      const zlib = require('zlib');
-      const method = String(options.method || 'GET').toUpperCase();
-      const rawHeaders = options.headers && typeof options.headers === 'object' ? options.headers : {};
-      const headers = {};
-      for (const k of Object.keys(rawHeaders)) {
-        const lk = k.toLowerCase();
-        if (lk === 'host' || lk === 'referer' || lk === 'origin') continue;
-        headers[k] = rawHeaders[k];
-      }
-      if (!headers['Accept-Encoding']) headers['Accept-Encoding'] = 'gzip, deflate';
-      if (!headers['User-Agent']) headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
-      if (!headers['Accept-Language']) headers['Accept-Language'] = 'zh-CN,zh;q=0.9';
-      const body = options.body;
-      async function fetchOnce(href){
-        const reqMod = href.startsWith('https:') ? https : http;
-        return await new Promise((resolve, reject) => {
-          const req = reqMod.request(href, { method, headers }, (res) => {
-            const chunks = [];
-            res.on('data', (c) => chunks.push(c));
-            res.on('end', () => {
-              try {
-                const status = res.statusCode || 0;
-                const redirect = status >= 300 && status < 400 && res.headers && res.headers.location;
-                const raw = Buffer.concat(chunks);
-                resolve({ status, headers: res.headers, contentBuffer: raw, redirect });
-              } catch (e) { reject(e); }
-            });
-          });
-          req.on('error', reject);
-          if (body && method !== 'GET' && method !== 'HEAD') {
-            if (Buffer.isBuffer(body)) req.write(body);
-            else req.write(String(body));
-          }
-          req.end();
-        });
-      }
-      let href = u; let redirects = 0;
-      while (redirects < 5) {
-        const r = await fetchOnce(href);
-        if (r.redirect) {
-          const nextUrl = new url.URL(r.redirect, href).href;
-          const nextParsed = new url.URL(nextUrl);
-          if (!wl.has(nextParsed.host)) return { ok: false, error: 'redirect domain not allowed', status: r.status };
-          href = nextUrl; redirects += 1; continue;
-        }
-        let buf = r.contentBuffer;
-        const enc = (r.headers['content-encoding']||'').toLowerCase();
-        if (enc.includes('gzip')) buf = zlib.gunzipSync(buf);
-        else if (enc.includes('deflate')) buf = zlib.inflateSync(buf);
-        const content = buf.toString('utf8');
-        return { ok: true, status: r.status, headers: r.headers, content };
-      }
-      return { ok: false, error: 'too many redirects' };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
-  searchKuwo: async (keyword = '', page = 0) => {
-    try {
-      const q = String(keyword || '').trim();
-      if (!q) return { ok: false, error: 'empty keyword' };
-      const rn = 20;
-      const buildUrl = (pn) => `https://search.kuwo.cn/r.s?all=${encodeURIComponent(q)}&pn=${pn}&rn=${rn}&vipver=100&ft=music&encoding=utf8&rformat=json&vermerge=1&mobi=1`;
-      async function fetchJson(urlStr){
-        const res = await functions.httpProxy(urlStr, { method: 'GET', headers: { 'Accept': 'application/json, text/plain, */*' } });
-        const rawTxt = String(res && res.content ? res.content : '');
-        let txt = rawTxt;
-        if (txt.trim()[0] !== '{') {
-          const s = txt.indexOf('{'); const e = txt.lastIndexOf('}');
-          if (s >= 0 && e > s) txt = txt.slice(s, e+1);
-        }
-        let obj = null;
-        try { obj = JSON.parse(txt); } catch (e) {}
-        return { obj, raw: rawTxt };
-      }
-      let dat = await fetchJson(buildUrl(page));
-      let data = dat.obj;
-      let raw = dat.raw;
-      let list = Array.isArray(data?.abslist) ? data.abslist : [];
-      if (!list.length) {
-        dat = await fetchJson(buildUrl(page === 0 ? 1 : page));
-        data = dat.obj;
-        raw = dat.raw;
-        list = Array.isArray(data?.abslist) ? data.abslist : [];
-      }
-      const items = list.map((item) => {
-        const id = String(item.MUSICRID || '').replace('MUSIC_', '');
-        const cover = item.web_albumpic_short
-          ? `https://img3.kuwo.cn/star/albumcover/${String(item.web_albumpic_short).replace('120/', '256/')}`
-          : (item.web_artistpic_short ? `https://star.kuwo.cn/star/starheads/${String(item.web_artistpic_short).replace('120/', '500/')}` : '');
-        const rawTitle = item.SONGNAME || '';
-        const title = rawTitle.includes('-') ? rawTitle.split('-').slice(0, -1).join('-').trim() : rawTitle;
-        return { id, title, artist: item.ARTIST || '', album: item.ALBUM || '', duration: item.DURATION || 0, cover, source: 'kuwo' };
-      });
-      const hasMore = (data?.PN || (page||0)) * (data?.RN || rn) < (data?.TOTAL || 0);
-      return { ok: true, items, hasMore, raw };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
-  searchBili: async (keyword = '', page = 1) => {
-    try {
-      const q = String(keyword || '').trim();
-      if (!q) return { ok: false, error: 'empty keyword' };
-      const https = require('https');
-      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
-      const data = await fetchJson(`https://api.3r60.top/v2/bili/s/?keydown=${encodeURIComponent(q)}`);
-      const arr = data && data.data && Array.isArray(data.data.result) ? data.data.result : [];
-      const pageSize = 20;
-      const pageArr = arr.slice(((Math.max(1, Number(page)||1)-1)*pageSize), (Math.max(1, Number(page)||1)*pageSize));
-      const items = [];
-      for (const it of pageArr) {
-        const bvid = it && it.bvid ? String(it.bvid) : '';
-        if (!bvid) continue;
-        try {
-          const meta = await fetchJson(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
-          const m = meta && meta.data ? meta.data : {};
-          const title = String(m.title || '');
-          const artist = (m.owner && m.owner.name) ? m.owner.name : '';
-          const album = m.tname_v2 ? String(m.tname_v2) : (m.tname ? String(m.tname) : '');
-          const duration = Number(m.duration || 0) || 0;
-          const cover = m.pic ? (String(m.pic).startsWith('http') ? m.pic : ('https:' + String(m.pic))) : '';
-          items.push({ id: bvid, title, artist, album, duration, cover, source: 'bili', cid: 'default' });
-        } catch (e) {}
-      }
-      const hasMore = arr.length > (Math.max(1, Number(page)||1) * pageSize);
-      return { ok: true, items, hasMore };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
-  getPlayUrl: async (item = {}, quality = 'standard') => {
-    try {
-      const src = String(item.source || 'kuwo');
-      if (src === 'bili') {
-        const r = await functions.getBiliPlayUrl(String(item.id||''), String(item.cid||''));
-        return r;
-      }
-      return await functions.getKuwoPlayUrl(String(item.id||''), String(quality||'standard'));
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
-  getBiliPlayUrl: async (bvid = '', cid = '') => {
-    try {
-      const https = require('https');
-      const fs = require('fs');
-      const os = require('os');
-      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
-      let c = String(cid || '');
-      if (!c || c === 'default') {
-        const v = await fetchJson(`https://api.bilibili.com/x/player/pagelist?bvid=${encodeURIComponent(String(bvid||''))}`);
-        c = v && v.data && Array.isArray(v.data) && v.data[0] && v.data[0].cid ? String(v.data[0].cid) : '';
-      }
-      if (!bvid || !c) return { ok: false, error: 'invalid bvid/cid' };
-      const info = await fetchJson(`https://api.bilibili.com/x/player/playurl?bvid=${encodeURIComponent(bvid)}&cid=${encodeURIComponent(c)}`);
-      const durl = info && info.data && Array.isArray(info.data.durl) ? info.data.durl : [];
-      const url0 = durl[0] && durl[0].url ? durl[0].url : null;
-      if (!url0) return { ok: false, error: 'resolve failed' };
-      const tempDir = require('path').join(os.tmpdir(), 'orbiboard.radio.bilibili', 'cache');
-      try { if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true }); } catch (e) {}
-      const fileName = `${String(bvid)}-${String(c)}.mp4`;
-      const cachePath = require('path').join(tempDir, fileName);
-      if (fs.existsSync(cachePath)) return { ok: true, url: require('url').pathToFileURL(cachePath).href };
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
-      async function headSize(u){ return await new Promise((resolve, reject) => { https.get(u, { method: 'HEAD', headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36', 'Accept-Encoding': 'gzip', 'Origin': 'https://www.bilibili.com', 'Referer': `https://www.bilibili.com/${String(bvid)}` } }, (res) => { const len = parseInt(res.headers['content-length']||'0', 10) || 0; resolve(len); }).on('error', reject); }); }
-      async function fetchRange(u, start, end){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36', 'Accept-Encoding': 'gzip', 'Origin': 'https://www.bilibili.com', 'Referer': `https://www.bilibili.com/${String(bvid)}`, 'Range': `bytes=${start}-${end}` } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>resolve(Buffer.concat(chunks))); }).on('error', reject); }); }
-      const size = await headSize(url0);
-      if (!size) return { ok: false, error: 'invalid content size' };
-      const parts = 10;
-      const chunk = Math.ceil(size / parts);
-      const tasks = [];
-      for (let i=0;i<parts;i++){ const s=i*chunk; const e=Math.min(size-1, (i+1)*chunk-1); tasks.push(fetchRange(url0, s, e)); }
-      const bufs = await Promise.all(tasks);
-      const out = Buffer.concat(bufs);
-      fs.writeFileSync(cachePath, out);
-      try {
-        const files = fs.readdirSync(tempDir);
-        const maxTemp = 50;
-        if (files.length > maxTemp) {
-          const oldest = files.sort((a,b)=>fs.statSync(require('path').join(tempDir,a)).mtime - fs.statSync(require('path').join(tempDir,b)).mtime)[0];
-          try { fs.unlinkSync(require('path').join(tempDir, oldest)); } catch (e) {}
-        }
-      } catch (e) {}
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
-      return { ok: true, url: require('url').pathToFileURL(cachePath).href };
-    } catch (e) {
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
-  getKuwoPlayUrl: async (id, quality = 'standard') => {
-    try {
-      const https = require('https');
-      const q = String(quality || 'standard');
-      const api = `https://api.limeasy.cn/kwmpro/v1/?id=${encodeURIComponent(String(id||''))}&quality=${encodeURIComponent(q)}`;
-      const data = await new Promise((resolve, reject) => {
-        https.get(api, { headers: { 'User-Agent': 'OrbiBoard/Radio' } }, (res) => {
-          const chunks = []; res.on('data', (c) => chunks.push(c));
-          res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { reject(e); } });
-        }).on('error', reject);
-      });
-      if (data && (data.code === 200 || data.code === 201) && data.url) return { ok: true, url: data.url };
-      return { ok: false, error: 'resolve failed' };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
-  kuwoProxy: async (targetUrl = '') => {
-    try {
-      const https = require('https');
-      const zlib = require('zlib');
-      const u = String(targetUrl || '').trim();
-      if (!u) return { ok: false, error: 'empty url' };
-      const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.kuwo.cn/',
-        'Origin': 'https://www.kuwo.cn',
-        'Accept-Encoding': 'gzip, deflate'
-      };
-      const content = await new Promise((resolve, reject) => {
-        https.get(u, { headers }, (res) => {
-          const chunks = [];
-          res.on('data', (c) => chunks.push(c));
-          res.on('end', () => {
-            try {
-              let buf = Buffer.concat(chunks);
-              const enc = (res.headers['content-encoding']||'').toLowerCase();
-              if (enc.includes('gzip')) buf = zlib.gunzipSync(buf);
-              else if (enc.includes('deflate')) buf = zlib.inflateSync(buf);
-              resolve(buf.toString('utf8'));
-            } catch (e) { reject(e); }
-          });
-        }).on('error', reject);
-      });
-      return { ok: true, content };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
-  setBackgroundMusic: async ({ music, album, albumName, title, artist, id, source }) => {
+  setBackgroundMusic: async ({ music, album, albumName, title, artist, id, source, cover }) => {
     try {
       const bgFile = path.join(__dirname, 'background', 'player.html');
       const u = new url.URL(url.pathToFileURL(bgFile).href);
       if (music) u.searchParams.set('music', String(music));
-      if (album) u.searchParams.set('album', String(album));
-      if (albumName) u.searchParams.set('albumName', String(albumName));
+      
+      let coverUrl = cover;
+      // Legacy compatibility: if album argument looks like a URL, treat it as cover
+      if (!coverUrl && album && (String(album).startsWith('http') || String(album).startsWith('data:') || String(album).startsWith('blob:'))) {
+        coverUrl = album;
+      }
+      if (coverUrl) u.searchParams.set('album', String(coverUrl));
+
+      let aName = albumName;
+      // If album argument is not a URL, treat it as album name if albumName is missing
+      if (!aName && album && !coverUrl) {
+        aName = album;
+      }
+      if (aName) u.searchParams.set('albumName', String(aName));
+
       if (title) u.searchParams.set('title', String(title));
       if (artist) u.searchParams.set('artist', String(artist));
-      if (id) u.searchParams.set('id', String(id));
+      
+      let pCount = 0;
+      if (id) {
+        u.searchParams.set('id', String(id));
+        // Update Play Count
+        const sId = String(id);
+        if (!state.playCounts[sId]) state.playCounts[sId] = 0;
+        state.playCounts[sId]++;
+        pCount = state.playCounts[sId];
+        saveData('counts');
+      }
+      u.searchParams.set('playCount', String(pCount));
+
       if (source) u.searchParams.set('source', String(source));
       u.searchParams.set('channel', state.eventChannel);
       pluginApi.emit(state.eventChannel, { type: 'update', target: 'backgroundUrl', value: u.href });
@@ -511,27 +572,30 @@ const functions = {
   },
   enqueueTail: async (item = {}) => {
     try {
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const it = {
+        ...item,
         id: String(item.id||''),
         title: String(item.title||''),
         artist: String(item.artist||''),
         album: String(item.album||''),
         cover: String(item.cover||''),
         duration: Number(item.duration||0) || 0,
-        source: String(item.source||'kuwo'),
-        cid: String(item.cid||'')
+        source: String(item.source||'kuwo')
       };
+      if (!it.cover) it.cover = await functions.resolveCover(it);
       if (!it.id) {
-        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
         return { ok: false, error: 'invalid item' };
       }
       const wasEmpty = state.playlist.length === 0 || state.currentIndex < 0;
       state.playlist.push(it);
+      addToHistory(it);
+      saveData('playlist');
       if (wasEmpty) {
         state.currentIndex = 0;
+        saveData('playlist');
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: it.title, artist: it.artist, playCount: state.playCounts[it.id] || 0, cover: it.cover }); } catch (e) {}
         const g = await functions.getPlayUrl(it, 'standard');
-        if (g && g.ok && g.url) await functions.setBackgroundMusic({ music: g.url, album: it.cover, albumName: it.album, title: it.title, artist: it.artist, id: it.id, source: it.source });
+        if (g && g.ok && g.url) await functions.setBackgroundMusic({ ...it, music: g.url, albumName: it.album });
       }
       pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
       try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
@@ -543,35 +607,39 @@ const functions = {
   },
   enqueueNext: async (item = {}) => {
     try {
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const it = {
+        ...item,
         id: String(item.id||''),
         title: String(item.title||''),
         artist: String(item.artist||''),
         album: String(item.album||''),
         cover: String(item.cover||''),
         duration: Number(item.duration||0) || 0,
-        source: String(item.source||'kuwo'),
-        cid: String(item.cid||'')
+        source: String(item.source||'kuwo')
       };
+      if (!it.cover) it.cover = await functions.resolveCover(it);
       if (!it.id) {
-        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
         return { ok: false, error: 'invalid item' };
       }
       const wasEmpty = state.playlist.length === 0 || state.currentIndex < 0;
       if (wasEmpty) {
         state.playlist.push(it);
         state.currentIndex = 0;
+        addToHistory(it);
+        saveData('playlist');
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: it.title, artist: it.artist, playCount: state.playCounts[it.id] || 0, cover: it.cover }); } catch (e) {}
         const g = await functions.getPlayUrl(it, 'standard');
-        if (g && g.ok && g.url) await functions.setBackgroundMusic({ music: g.url, album: it.cover, albumName: it.album, title: it.title, artist: it.artist, id: it.id, source: it.source });
+        if (g && g.ok && g.url) await functions.setBackgroundMusic({ ...it, music: g.url, albumName: it.album });
         pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
         try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
         return { ok: true, length: state.playlist.length, pos: 0 };
       } else {
         const pos = state.currentIndex >= 0 ? state.currentIndex + 1 : state.playlist.length;
         state.playlist.splice(pos, 0, it);
+        addToHistory(it);
+        saveData('playlist');
         pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
-        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        // No loading screen for enqueue next if not playing
         return { ok: true, length: state.playlist.length, pos };
       }
     } catch (e) {
@@ -581,66 +649,139 @@ const functions = {
   },
   playNow: async (item = {}) => {
     try {
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const id = String(item.id||'');
       if (!id) return { ok: false, error: 'invalid item id' };
       const meta = {
+        ...item,
         id,
         title: String(item.title||''),
         artist: String(item.artist||''),
         album: String(item.album||''),
         cover: String(item.cover||''),
         duration: Number(item.duration||0) || 0,
-        source: String(item.source||'kuwo'),
-        cid: String(item.cid||'')
+        source: String(item.source||'kuwo')
       };
-      // push into playlist and mark current
+      if (!meta.cover) meta.cover = await functions.resolveCover(meta);
+      
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: meta.title, artist: meta.artist, playCount: state.playCounts[meta.id] || 0, cover: meta.cover }); } catch (e) {}
+
       state.playlist.push(meta);
       state.currentIndex = state.playlist.length - 1;
+      addToHistory(meta);
+      saveData('playlist');
       pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
       const g = await functions.getPlayUrl(meta, 'standard');
-      if (!g || !g.ok || !g.url) return { ok: false, error: g?.error || 'resolve failed' };
-      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, albumName: meta.album, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
+      if (!g || !g.ok || !g.url) {
+         try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+         return { ok: false, error: g?.error || 'resolve failed' };
+      }
+      await functions.setBackgroundMusic({ ...meta, music: g.url, albumName: meta.album });
       return { ok: true };
     } catch (e) {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: false, error: e?.message || String(e) };
     }
   },
   nextTrack: async (cause = 'manual') => {
     try {
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
+      const mode = state.settings.playMode || 'sequence';
       const prevIdx = state.currentIndex;
-      let nextIdx = prevIdx >= 0 ? prevIdx + 1 : (state.playlist.length ? 0 : -1);
-      const isLast = prevIdx === state.playlist.length - 1;
-      if (cause === 'ended' && state.settings.removeAfterPlay && prevIdx >= 0 && prevIdx < state.playlist.length) {
-        state.playlist.splice(prevIdx, 1);
-        pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
-        nextIdx = prevIdx;
+      const len = state.playlist.length;
+      if (len === 0) return { ok: false, error: 'empty playlist' };
+
+      let nextIdx = -1;
+      
+      // Handle Remove After Play
+      // Only active if mode is Random, Sequence, or Play Once
+      const canRemove = ['random', 'sequence', 'play-once'].includes(mode);
+      const shouldRemove = cause === 'ended' && state.settings.removeAfterPlay && canRemove;
+      
+      if (shouldRemove && prevIdx >= 0 && prevIdx < len) {
+         state.playlist.splice(prevIdx, 1);
+         saveData('playlist');
+         pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+         
+         if (state.playlist.length === 0) {
+             state.currentIndex = -1;
+             return { ok: false, error: 'playlist ended' };
+         }
+
+         if (mode === 'random') {
+             nextIdx = Math.floor(Math.random() * state.playlist.length);
+         } else if (mode === 'play-once') {
+             state.currentIndex = -1; 
+             return { ok: false, error: 'play once ended' };
+         } else {
+             // sequence
+             nextIdx = prevIdx; 
+             if (nextIdx >= state.playlist.length) return { ok: false, error: 'playlist ended' }; 
+         }
+      } else {
+         if (cause === 'ended') {
+             if (mode === 'single-loop') {
+                 nextIdx = prevIdx;
+             } else if (mode === 'play-once') {
+                 return { ok: false, error: 'play once ended' };
+             } else if (mode === 'random') {
+                 nextIdx = Math.floor(Math.random() * len);
+             } else if (mode === 'list-loop') {
+                 nextIdx = (prevIdx + 1) % len;
+             } else { // sequence
+                 if (prevIdx >= len - 1) return { ok: false, error: 'playlist ended' };
+                 nextIdx = prevIdx + 1;
+             }
+         } else {
+             // Manual Next
+             if (mode === 'random') {
+                 nextIdx = Math.floor(Math.random() * len);
+             } else {
+                 // Sequence/PlayOnce manual -> next or stop
+                 if (mode === 'sequence' || mode === 'play-once') {
+                     if (prevIdx >= len - 1) return { ok: false, error: 'no next track' };
+                     nextIdx = prevIdx + 1;
+                 } else {
+                     // List Loop, Single Loop (Manual) -> Wrap
+                     nextIdx = (prevIdx + 1) % len;
+                 }
+             }
+         }
       }
-      if (cause === 'manual' && isLast) return { ok: false, error: 'no next track' };
-      if (nextIdx < 0 || nextIdx >= state.playlist.length) return { ok: false, error: 'no next track' };
+
       state.currentIndex = nextIdx;
       const meta = state.playlist[nextIdx];
+      
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: meta.title, artist: meta.artist, playCount: state.playCounts[meta.id] || 0, cover: meta.cover }); } catch (e) {}
+      
       const g = await functions.getPlayUrl(meta, 'standard');
-      if (!g || !g.ok || !g.url) return { ok: false, error: g?.error || 'resolve failed' };
-      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, albumName: meta.album, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
+      if (!g || !g.ok || !g.url) {
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        return { ok: false, error: g?.error || 'resolve failed' };
+      }
+      await functions.setBackgroundMusic({ ...meta, music: g.url, albumName: meta.album });
       return { ok: true };
     } catch (e) {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: false, error: e?.message || String(e) };
     }
   },
   prevTrack: async () => {
     try {
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const prevIdx = state.currentIndex > 0 ? state.currentIndex - 1 : -1;
       if (prevIdx < 0 || prevIdx >= state.playlist.length) return { ok: false, error: 'no previous track' };
       state.currentIndex = prevIdx;
       const meta = state.playlist[prevIdx];
+      
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: meta.title, artist: meta.artist, playCount: state.playCounts[meta.id] || 0, cover: meta.cover }); } catch (e) {}
+      
       const g = await functions.getPlayUrl(meta, 'standard');
-      if (!g || !g.ok || !g.url) return { ok: false, error: g?.error || 'resolve failed' };
-      await functions.setBackgroundMusic({ music: g.url, album: meta.cover, albumName: meta.album, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
+      if (!g || !g.ok || !g.url) {
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        return { ok: false, error: g?.error || 'resolve failed' };
+      }
+      await functions.setBackgroundMusic({ ...meta, music: g.url, albumName: meta.album });
       return { ok: true };
     } catch (e) {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: false, error: e?.message || String(e) };
     }
   },
@@ -653,11 +794,20 @@ const functions = {
     }
   },
   setRemoveAfterPlay: async (flag = false) => {
-    try { state.settings.removeAfterPlay = !!flag; return { ok: true, value: state.settings.removeAfterPlay }; }
+    try { state.settings.removeAfterPlay = !!flag; saveData('settings'); return { ok: true, value: state.settings.removeAfterPlay }; }
     catch (e) { return { ok: false, error: e?.message || String(e) }; }
   },
   setEndTime: async (timeStr = '') => {
-    try { state.settings.endTime = String(timeStr || ''); return { ok: true, value: state.settings.endTime }; }
+    try { 
+        state.settings.endTime = String(timeStr || ''); 
+        state.timerTriggered = false; // Reset trigger state when time changes
+        saveData('settings');
+        return { ok: true, value: state.settings.endTime }; 
+    }
+    catch (e) { return { ok: false, error: e?.message || String(e) }; }
+  },
+  setPauseAtEndTime: async (flag = false) => {
+    try { state.settings.pauseAtEndTime = !!flag; saveData('settings'); return { ok: true, value: state.settings.pauseAtEndTime }; }
     catch (e) { return { ok: false, error: e?.message || String(e) }; }
   },
   getSettings: async () => {
@@ -700,73 +850,24 @@ const functions = {
       return { ok: false, error: e?.message || String(e) };
     }
   },
-  fetchKuwoLyrics: async (id, isLyricx = true) => {
-    try {
-      const https = require('https');
-      const http = require('http');
-      const zlib = require('zlib');
-      const bufKey = Buffer.from('yeelion');
-      function buildParams(mid, lrcx){
-        let params = `user=12345,web,web,web&requester=localhost&req=1&rid=MUSIC_${String(mid)}`;
-        if (lrcx) params += '&lrcx=1';
-        const src = Buffer.from(params);
-        const out = Buffer.alloc(src.length * 2);
-        let k = 0;
-        for (let i=0;i<src.length;){ for (let j=0;j<bufKey.length && i<src.length; j++, i++){ out[k++] = bufKey[j] ^ src[i]; } }
-        return out.slice(0, k).toString('base64');
-      }
-      async function inflateAsync(buf){ return await new Promise((resolve, reject) => zlib.inflate(buf, (e, r) => e ? reject(e) : resolve(r))); }
-      function requestRaw(u){ return new Promise((resolve, reject) => { const lib = u.startsWith('https') ? https : http; const req = lib.get(u, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>resolve(Buffer.concat(chunks))); }).on('error', reject); req.setTimeout(15000, () => { try{req.destroy(new Error('timeout'));}catch (e) {} }); }); }
-      const api = `http://newlyric.kuwo.cn/newlyric.lrc?${buildParams(id, !!isLyricx)}`;
-      const raw = await requestRaw(api);
-      const head = raw.toString('utf8', 0, 12);
-      if (!head.startsWith('tp=content')) return { ok: false, error: 'no content' };
-      const start = raw.indexOf('\r\n\r\n');
-      const inflated = await inflateAsync(raw.slice(start + 4));
-      if (!isLyricx) return { ok: true, format: 'plain', dataBase64: Buffer.from(inflated).toString('base64') };
-      const base = Buffer.from(inflated.toString('utf8'), 'base64');
-      const out = Buffer.alloc(base.length * 2);
-      let k = 0;
-      for (let i=0;i<base.length;){ for (let j=0;j<bufKey.length && i<base.length; j++, i++){ out[k++] = base[i] ^ bufKey[j]; } }
-      return { ok: true, format: 'lrcx', dataBase64: out.slice(0, k).toString('base64') };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
-  fetchBiliLyrics: async (bvid, cid) => {
-    try {
-      const https = require('https');
-      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
-      
-      let c = String(cid || '');
-      if (!c || c === 'default') {
-        try {
-          const v = await fetchJson(`https://api.bilibili.com/x/player/pagelist?bvid=${encodeURIComponent(String(bvid||''))}`);
-          c = v && v.data && Array.isArray(v.data) && v.data[0] && v.data[0].cid ? String(v.data[0].cid) : '';
-        } catch (e) { }
-      }
-      if (!c) return { ok: false, error: 'no cid' };
-
-      async function fetchText(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(Buffer.concat(chunks).toString('utf8')); }catch(e){ reject(e); } }); }).on('error', reject); }); }
-      
-      const content = await fetchText(`https://api.3r60.top/v2/bili/t/?bvid=${encodeURIComponent(String(bvid||''))}&cid=${encodeURIComponent(c)}`);
-      return { ok: true, content };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
   playIndex: async (idx = 0) => {
     try {
-      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
       const i = Math.floor(Number(idx)||0);
       if (i < 0 || i >= state.playlist.length) return { ok: false, error: 'index out of range' };
       state.currentIndex = i;
       const meta = state.playlist[i];
+      
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: meta.title, artist: meta.artist, playCount: state.playCounts[meta.id] || 0, cover: meta.cover }); } catch (e) {}
+      
       const g = await functions.getPlayUrl(meta, 'standard');
-      if (!g || !g.ok || !g.url) return { ok: false, error: g?.error || 'resolve failed' };
+      if (!g || !g.ok || !g.url) {
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        return { ok: false, error: g?.error || 'resolve failed' };
+      }
       await functions.setBackgroundMusic({ music: g.url, album: meta.cover, albumName: meta.album, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });
       return { ok: true };
     } catch (e) {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: false, error: e?.message || String(e) };
     }
   },
@@ -777,157 +878,6 @@ const functions = {
       if (!p) return { ok: false, error: 'invalid path' };
       const data = fs.readFileSync(p, 'utf8');
       return { ok: true, content: data };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  },
-  getAmlEntryUrls: async () => {
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const toUrl = (p) => url.pathToFileURL(p).href;
-      function unique(arr){ const s=new Set(arr.filter(Boolean)); return Array.from(s); }
-      function candidateNodeModules(){
-        const bases = unique([
-          process.cwd(),
-          __dirname,
-          path.dirname(__dirname),
-          path.dirname(path.dirname(__dirname)),
-          path.dirname(path.dirname(path.dirname(__dirname))),
-          (process.resourcesPath ? path.join(process.resourcesPath, 'app') : null),
-          (process.resourcesPath ? path.join(process.resourcesPath, 'app', 'node_modules') : null),
-        ]);
-        const nodes = [];
-        for (const b of bases) {
-          if (!b) continue;
-          nodes.push(path.join(b, 'node_modules'));
-          nodes.push(path.join(b, '..', 'node_modules'));
-        }
-        return unique([...(require.main?.paths || []), ...(module.paths || []), ...nodes]);
-      }
-      function resolveFromPaths(pkgName){
-        const nodes = candidateNodeModules();
-        for (const nm of nodes) {
-          try {
-            const pkgJsonPath = path.join(nm, pkgName, 'package.json');
-            if (!fs.existsSync(pkgJsonPath)) continue;
-            const pkgDir = path.dirname(pkgJsonPath);
-            const meta = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-            const candidates = [];
-            if (typeof meta === 'object') {
-              if (typeof meta.unpkg === 'string') candidates.push(meta.unpkg);
-              if (typeof meta.module === 'string') candidates.push(meta.module);
-              if (typeof meta.browser === 'string') candidates.push(meta.browser);
-              if (meta.exports && typeof meta.exports === 'object') {
-                const exp = meta.exports;
-                if (typeof exp.import === 'string') candidates.push(exp.import);
-                if (typeof exp.default === 'string') candidates.push(exp.default);
-                if (exp['.'] && typeof exp['.'] === 'object') {
-                  if (typeof exp['.'].import === 'string') candidates.push(exp['.'].import);
-                  if (typeof exp['.'].default === 'string') candidates.push(exp['.'].default);
-                }
-              }
-              if (typeof meta.main === 'string') candidates.push(meta.main);
-            }
-            const fallback = ['dist/esm/index.js','dist/index.js','index.js'];
-            for (const rel of [...candidates, ...fallback]) {
-              const full = path.join(pkgDir, rel);
-              try { if (fs.existsSync(full)) return { file: full, pkgDir, style: path.join(pkgDir, 'style.css') }; } catch (e) {}
-            }
-            return { file: null, pkgDir, style: path.join(pkgDir, 'style.css') };
-          } catch (e) {}
-        }
-        return { file: null, pkgDir: null, style: null };
-      }
-      function resolveEsm(pkgName, rel) {
-        try {
-          const pkgJsonPath = require.resolve(path.join(pkgName, 'package.json'));
-          const pkgDir = path.dirname(pkgJsonPath);
-          const full = path.join(pkgDir, rel || 'dist/esm/index.js');
-          if (fs.existsSync(full)) return toUrl(full);
-        } catch (e) {}
-        const info = resolveFromPaths(pkgName);
-        if (info && info.file && /\/dist\/esm\//.test(info.file)) return toUrl(info.file);
-        return null;
-      }
-      function resolveEntry(pkgName) {
-        let pkgJsonPath = null;
-        try { pkgJsonPath = require.resolve(path.join(pkgName, 'package.json')); } catch (e) {}
-        if (!pkgJsonPath) {
-          const info = resolveFromPaths(pkgName);
-          if (!info || !info.pkgDir) return info;
-          pkgJsonPath = path.join(info.pkgDir, 'package.json');
-        }
-        try {
-          const pkgDir = path.dirname(pkgJsonPath);
-          const meta = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-          const candidates = [];
-          if (typeof meta === 'object') {
-            if (meta.exports && typeof meta.exports === 'object') {
-              const exp = meta.exports;
-              if (typeof exp.import === 'string') candidates.push(exp.import);
-              if (exp['.'] && typeof exp['.'] === 'object') {
-                if (typeof exp['.'].import === 'string') candidates.push(exp['.'].import);
-              }
-            }
-            if (typeof meta.module === 'string') candidates.push(meta.module);
-            if (typeof meta.browser === 'string') candidates.push(meta.browser);
-            if (typeof meta.main === 'string') candidates.push(meta.main);
-          }
-          const fallback = ['dist/esm/index.js','dist/index.js','index.js'];
-          for (const rel of [...candidates, ...fallback]) {
-            const full = path.join(pkgDir, rel);
-            try { if (fs.existsSync(full)) return { file: full, pkgDir, style: path.join(pkgDir, 'style.css') }; } catch (e) {}
-          }
-          return { file: null, pkgDir, style: path.join(pkgDir, 'style.css') };
-        } catch (e) {
-          return { file: null, pkgDir: null, style: null };
-        }
-      }
-      const coreInfo = resolveEntry('@applemusic-like-lyrics/core');
-      const lyricInfo = resolveEntry('@applemusic-like-lyrics/lyric');
-      const pixiPackages = [
-        '@pixi/app',
-        '@pixi/core',
-        '@pixi/display',
-        '@pixi/filter-blur',
-        '@pixi/filter-bulge-pinch',
-        '@pixi/filter-color-matrix',
-        '@pixi/sprite',
-        '@pixi/utils'
-      ];
-      function buildPixiDepsFromCore(pkgDir){
-        try {
-          const meta = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
-          const set = new Set(pixiPackages);
-          const addFrom = (obj) => {
-            if (obj && typeof obj === 'object') {
-              for (const k of Object.keys(obj)) { if (k.startsWith('@pixi/')) set.add(k); }
-            }
-          };
-          addFrom(meta.dependencies);
-          addFrom(meta.peerDependencies);
-          return Array.from(set);
-        } catch (e) {
-          return pixiPackages;
-        }
-      }
-      const importMap = {};
-      const allPixi = coreInfo && coreInfo.pkgDir ? buildPixiDepsFromCore(coreInfo.pkgDir) : pixiPackages;
-      for (const name of allPixi) {
-        const u = resolveEsm(name, 'dist/esm/index.js');
-        if (u) importMap[name] = u;
-      }
-      const coreUrlLocal = coreInfo.file ? toUrl(coreInfo.file) : null;
-      const lyricUrlLocal = lyricInfo.file ? toUrl(lyricInfo.file) : null;
-      const coreStyleLocal = coreInfo.style && coreInfo.pkgDir && fs.existsSync(coreInfo.style) ? toUrl(coreInfo.style) : null;
-      return {
-        ok: true,
-        coreUrl: coreUrlLocal,
-        lyricUrl: lyricUrlLocal,
-        coreStyleUrl: coreStyleLocal,
-        importMap
-      };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
     }
@@ -945,7 +895,12 @@ const functions = {
         state.currentFloatingUrl = payload.value || null;
       }
       if (payload.type === 'click' || payload.type === 'left.click') {
-        if (payload.id === 'tab-recommend') {
+        if (payload.id === 'tab-discovery') {
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 860, height: 520 } });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.discovery });
+          state.currentFloatingUrl = state.pages.discovery;
+        } else if (payload.id === 'tab-recommend') {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 860, height: 520 } });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.recommend });
@@ -955,26 +910,31 @@ const functions = {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 860, height: 520 } });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.search });
           state.currentFloatingUrl = state.pages.search;
-        } else if (payload.id === 'tab-settings' || payload.id === 'btn-settings') {
+        } else if (payload.id === 'tab-history') {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 860, height: 520 } });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.history });
+          state.currentFloatingUrl = state.pages.history;
+        } else if (payload.id === 'tab-settings' || payload.id === 'btn-settings') {
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'left-bottom' });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 720, height: 520 } });
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.settings });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.settings + '?tab=general' });
           state.currentFloatingUrl = state.pages.settings;
         } else if (payload.id === 'btn-download') {
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 640, height: 480 } });
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.download });
-          state.currentFloatingUrl = state.pages.download;
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'left-bottom' });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 720, height: 520 } });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.settings + '?tab=download' });
+          state.currentFloatingUrl = state.pages.settings;
         } else if (payload.id === 'tab-about') {
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 640, height: 400 } });
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.about });
-          state.currentFloatingUrl = state.pages.about;
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'left-bottom' });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 720, height: 520 } });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.settings + '?tab=about' });
+          state.currentFloatingUrl = state.pages.settings;
         } else if (payload.id === 'btn-bgmode') {
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 560, height: 420 } });
-          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.bgSettings });
-          state.currentFloatingUrl = state.pages.bgSettings;
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'left-bottom' });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 720, height: 520 } });
+          pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingUrl', value: state.pages.settings + '?tab=background' });
+          state.currentFloatingUrl = state.pages.settings;
         } else if (payload.id === 'btn-debug-lyrics') {
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: 'center' });
           pluginApi.emit(state.eventChannel, { type: 'update', target: 'floatingBounds', value: { width: 920, height: 640 } });
@@ -991,6 +951,31 @@ const functions = {
 
 const init = async (api) => {
   pluginApi = api;
+  loadData();
+  
+  // Start Timer Loop
+  setInterval(() => {
+      if (!state.settings.endTime || !state.settings.pauseAtEndTime) return;
+      if (state.timerTriggered) {
+          // Check if we passed the time significantly (e.g. new day), reset trigger?
+          // Or if user changed time (handled in setEndTime)
+          // For now, simple logic: if time matches, trigger once.
+          return;
+      }
+      
+      const now = new Date();
+      const h = now.getHours();
+      const m = now.getMinutes();
+      const [th, tm] = state.settings.endTime.split(':').map(x => parseInt(x, 10));
+      
+      if (h === th && m === tm) {
+          state.timerTriggered = true;
+          // Send pause command
+          pluginApi.emit(state.eventChannel, { type: 'control', command: 'pause' });
+          console.log('[MusicRadio] Timer triggered: Pausing playback');
+      }
+  }, 5000); // Check every 5 seconds
+
   api.splash.setStatus('plugin:init', '初始化 音乐电台');
   api.splash.setStatus('plugin:init', '背景为 播放器背景');
   api.splash.setStatus('plugin:init', '音乐电台加载完成');

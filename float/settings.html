@@ -6,64 +6,462 @@
   <title>设置</title>
   <link rel="stylesheet" href="../../../renderer/remixicon-local.css" />
   <style>
-    html, body { height: 100%; margin: 0; background: #181818; color: #e6e6e6; font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; }
-    .wrap { height: 100%; display: flex; flex-direction: column; }
-    header { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid #2a2a2a; }
-    .content { padding: 16px; line-height: 1.8; }
-    .content a { color: #9cd2ff; text-decoration: none; }
-    ul { margin: 8px 0 0; padding-left: 20px; color: #c8c8c8; }
+    :root {
+      --bg: #181818;
+      --sidebar-bg: #202020;
+      --fg: #e6e6e6;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --input-bg: #2a2a2a;
+      --accent: #6ab4ff;
+      --hover: #333;
+      --active: #383838;
+      --success: #5b8;
+      --error: #f55;
+      --downloading: #9ad;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; transition: background 0.3s, color 0.3s; overflow: hidden; }
+    .wrap { height: 100%; display: flex; }
+    
+    /* Sidebar */
+    .sidebar { width: 160px; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 10px 0; }
+    .tab-btn { padding: 10px 20px; cursor: pointer; color: var(--muted); transition: all 0.2s; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .tab-btn:hover { background: var(--hover); color: var(--fg); }
+    .tab-btn.active { background: var(--active); color: var(--accent); border-right: 3px solid var(--accent); font-weight: 600; }
+    .tab-btn i { font-size: 16px; }
+
+    /* Content */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .page { display: none; flex: 1; overflow-y: auto; padding: 20px; animation: fadeIn 0.2s; }
+    .page.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+    h2 { margin: 0 0 20px 0; font-size: 18px; font-weight: 600; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+    
+    .group { margin-bottom: 24px; }
+    .group-title { font-size: 13px; color: var(--accent); font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    
+    .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 14px; }
+    .row label { color: var(--fg); opacity: 0.9; }
+    .row .desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    
+    input[type="text"], input[type="time"], input[type="number"], select { background: var(--input-bg); border: 1px solid var(--border); color: var(--fg); padding: 6px 10px; border-radius: 6px; outline: none; font-size: 13px; min-width: 120px; transition: border-color 0.2s; }
+    input[type="text"]:focus, input[type="time"]:focus, select:focus { border-color: var(--accent); }
+    
+    input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+    
+    input[type="range"] { vertical-align: middle; accent-color: var(--accent); }
+    
+    button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--input-bg); color: var(--fg); cursor: pointer; transition: all 0.2s; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+    button:hover { background: var(--hover); border-color: var(--muted); }
+    button:active { transform: scale(0.98); }
+    
+    /* Download List */
+    .dl-list { border: 1px solid var(--border); border-radius: 8px; max-height: 300px; overflow-y: auto; background: var(--input-bg); }
+    .dl-item { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; font-size: 13px; }
+    .dl-item:last-child { border-bottom: none; }
+    .dl-info { flex: 1; min-width: 0; }
+    .dl-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+    .dl-status { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
   </style>
 </head>
 <body>
   <div class="wrap">
-    <header>
-      <div style="display:flex; align-items:center; justify-content:space-between;">
-        <div style="font-weight:600;">设置</div>
-        <div style="display:flex; gap:8px;">
-          <button id="openBg" title="背景设置" style="border:0; background:#2a2a2a; color:#eee; padding:6px 10px; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px;"><i class="ri-contrast-drop-2-line"></i> 背景</button>
-          <button id="openDebug" title="调试歌词" style="border:0; background:#2a2a2a; color:#eee; padding:6px 10px; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px;"><i class="ri-bug-line"></i> 调试</button>
+    <div class="sidebar">
+      <div class="tab-btn active" onclick="switchTab('general')"><i class="ri-settings-3-line"></i> 常规</div>
+      <div class="tab-btn" onclick="switchTab('background')"><i class="ri-image-line"></i> 背景</div>
+      <div class="tab-btn" onclick="switchTab('download')"><i class="ri-download-line"></i> 下载</div>
+      <div class="tab-btn" onclick="switchTab('about')"><i class="ri-information-line"></i> 关于</div>
+    </div>
+    
+    <div class="main">
+      <!-- General Tab -->
+      <div id="tab-general" class="page active">
+        <h2>常规设置</h2>
+        <div class="group">
+          <div class="group-title">定时提醒</div>
+          <div class="row">
+            <div>
+              <label>截止时间</label>
+              <div class="desc">若点歌后预计播放结束时间超过该点，显示红字提示</div>
+            </div>
+            <input type="time" id="endTime">
+          </div>
+          <div class="row">
+            <label>到点暂停</label>
+            <input type="checkbox" id="pauseAtEndTime">
+          </div>
+        </div>
+        
+        <div class="group">
+          <div class="group-title">调试工具</div>
+          <div class="row">
+            <label>调试歌词窗口</label>
+            <button id="openDebug"><i class="ri-bug-line"></i> 打开</button>
+          </div>
         </div>
       </div>
-    </header>
-    <div class="content">
-      <div style="margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid #2a2a2a;">
-        <div style="margin-bottom:8px; font-weight:600;">定时提醒</div>
-        <div style="display:flex; align-items:center; gap:10px; font-size:13px; color:#aaa;">
-          <span>当时间早于</span>
-          <input type="time" id="endTime" style="background:#202020; border:1px solid #333; color:#eee; padding:4px 8px; border-radius:4px;">
-          <span>时，若点歌后预计播放结束时间超过该点，则显示红字提示。</span>
+
+      <!-- Background Tab -->
+      <div id="tab-background" class="page">
+        <h2>背景设置</h2>
+        <div class="group">
+          <div class="group-title">模式选择</div>
+          <div class="row">
+            <label>背景模式</label>
+            <select id="bgMode">
+              <option value="blur">封面模糊</option>
+              <option value="shine">流动光影</option>
+              <option value="gradient">封面渐变</option>
+              <option value="flowing">流动渐变</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="blurGroup" class="group">
+          <div class="group-title">模糊参数</div>
+          <div class="row">
+            <label>模糊强度</label>
+            <input id="blurPx" type="range" min="10" max="120" step="1" />
+          </div>
+          <div class="row">
+            <label>亮度衰减</label>
+            <input id="darkRate" type="range" min="0.2" max="1.0" step="0.01" />
+          </div>
+        </div>
+
+        <div id="shineGroup" class="group" style="display:none;">
+          <div class="group-title">光影参数</div>
+          <div class="row">
+            <div>
+              <label>音频律动</label>
+              <div class="desc">光影缩放与旋转速度随音乐变化</div>
+            </div>
+            <input id="shineReactive" type="checkbox" />
+          </div>
+        </div>
+
+        <div id="flowingGroup" class="group" style="display:none;">
+          <div class="group-title">渐变参数</div>
+          <div class="row">
+            <label>流速</label>
+            <input id="flowingSpeed" type="range" min="0.2" max="3.0" step="0.1" />
+          </div>
+          <div class="row">
+            <div>
+              <label>音频律动</label>
+              <div class="desc">流动速度随音乐节奏变化</div>
+            </div>
+            <input id="flowingReactive" type="checkbox" />
+          </div>
+        </div>
+
+        <div class="group">
+          <div class="group-title">可视化</div>
+          <div class="row">
+            <label>底部频谱</label>
+            <input id="spectrumEnabled" type="checkbox" />
+          </div>
         </div>
       </div>
+
+      <!-- Download Tab -->
+      <div id="tab-download" class="page">
+        <h2>下载管理</h2>
+        <div class="group">
+          <div class="group-title">下载设置</div>
+          <div class="row">
+            <label>保存目录</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="dlDir" readonly style="width:140px; color:var(--muted); cursor:default;">
+              <button id="browseBtn">浏览</button>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>命名格式</label>
+              <div class="desc">{t}标题 {a}歌手 {l}专辑</div>
+            </div>
+            <input type="text" id="dlFormat" placeholder="{t} - {a}" style="width:100px;">
+          </div>
+          <div class="row">
+            <label>同时下载歌词 (.lrc)</label>
+            <input type="checkbox" id="dlLrc">
+          </div>
+          <div class="row" style="justify-content: flex-end;">
+            <button id="saveDlSettings">保存设置</button>
+          </div>
+        </div>
+        
+        <div class="group">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div class="group-title" style="margin:0;">任务列表</div>
+            <button onclick="refreshDownloads()" style="padding:4px 8px; font-size:12px;"><i class="ri-refresh-line"></i></button>
+          </div>
+          <div class="dl-list" id="dlList">
+            <div style="padding:20px; text-align:center; color:var(--muted);">暂无任务</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- About Tab -->
+      <div id="tab-about" class="page">
+        <h2>关于</h2>
+        <div style="padding: 20px; text-align: center; color: var(--muted);">
+          <div style="font-size: 48px; margin-bottom: 10px; color: var(--accent);"><i class="ri-radio-2-fill"></i></div>
+          <div style="font-size: 18px; color: var(--fg); font-weight: 600; margin-bottom: 6px;">音乐电台</div>
+          <div style="font-size: 13px;">底栏应用样式的音乐播放器</div>
+          <div style="margin-top: 20px; font-size: 12px; line-height: 1.6;">
+            集成本地播放内核<br>
+            支持多源插件扩展<br>
+            <br>
+            Version 1.0.1
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
-  <script>
-    (function(){
-      const openBg = document.getElementById('openBg');
-      const openDebug = document.getElementById('openDebug');
-      const endTimeInput = document.getElementById('endTime');
 
-      // Load Settings
-      (async () => {
+  <script>
+    // --- Theme Logic ---
+    window.applyTheme = (mode, color) => {
+      const root = document.documentElement;
+      const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      const accent = color || '#6ab4ff';
+      root.style.setProperty('--accent', accent);
+      
+      if (isDark) {
+        root.style.setProperty('--bg', '#181818');
+        root.style.setProperty('--sidebar-bg', '#202020');
+        root.style.setProperty('--fg', '#e6e6e6');
+        root.style.setProperty('--muted', '#aaa');
+        root.style.setProperty('--border', '#2a2a2a');
+        root.style.setProperty('--input-bg', '#2a2a2a');
+        root.style.setProperty('--hover', '#333');
+        root.style.setProperty('--active', '#383838');
+      } else {
+        root.style.setProperty('--bg', '#ffffff');
+        root.style.setProperty('--sidebar-bg', '#f7f7f7');
+        root.style.setProperty('--fg', '#333333');
+        root.style.setProperty('--muted', '#666666');
+        root.style.setProperty('--border', '#e0e0e0');
+        root.style.setProperty('--input-bg', '#fff');
+        root.style.setProperty('--hover', '#eee');
+        root.style.setProperty('--active', '#e6e6e6');
+      }
+    };
+
+    (async () => {
+      try {
+        if (window.lowbarAPI?.configGet) {
+          const mode = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+          const color = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+          window.applyTheme(mode, color);
+        }
+        if (window.lowbarAPI?.onConfigChanged) {
+          window.lowbarAPI.onConfigChanged(({ scope, key, value }) => {
+            if (scope === 'system') {
+               (async () => {
+                 const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+                 const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+                 window.applyTheme(m, c);
+               })();
+            }
+          });
+        }
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async () => {
+           const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+           if (m === 'system') {
+              const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+              window.applyTheme('system', c);
+           }
+        });
+      } catch (e) { console.error('Theme init failed', e); }
+    })();
+
+    // --- Tab Logic ---
+    window.switchTab = (id) => {
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+      
+      const btn = document.querySelector(`.tab-btn[onclick="switchTab('${id}')"]`);
+      const page = document.getElementById(`tab-${id}`);
+      
+      if (btn) btn.classList.add('active');
+      if (page) page.classList.add('active');
+    };
+
+    // --- Main Logic ---
+    (function(){
+      // General
+      const endTimeInput = document.getElementById('endTime');
+      const pauseAtEndTimeInput = document.getElementById('pauseAtEndTime');
+      const openDebug = document.getElementById('openDebug');
+      
+      // Background
+      const bgModeEl = document.getElementById('bgMode');
+      const blurEl = document.getElementById('blurPx');
+      const darkEl = document.getElementById('darkRate');
+      const shineReactiveEl = document.getElementById('shineReactive');
+      const flowingSpeedEl = document.getElementById('flowingSpeed');
+      const flowingReactiveEl = document.getElementById('flowingReactive');
+      const spectrumEnabledEl = document.getElementById('spectrumEnabled');
+      const blurGroup = document.getElementById('blurGroup');
+      const shineGroup = document.getElementById('shineGroup');
+      const flowingGroup = document.getElementById('flowingGroup');
+
+      // Download
+      const dlDirInput = document.getElementById('dlDir');
+      const browseBtn = document.getElementById('browseBtn');
+      const dlFormatInput = document.getElementById('dlFormat');
+      const dlLrcInput = document.getElementById('dlLrc');
+      const saveDlBtn = document.getElementById('saveDlSettings');
+      const dlListEl = document.getElementById('dlList');
+
+      // Helpers
+      function read(k, def){ try { const v = localStorage.getItem(k); return v===null||v===undefined ? def : v; } catch (e) { return def; } }
+      function write(k, v){ try { localStorage.setItem(k, String(v)); } catch (e) {} }
+      function emitApply(){ try { window.lowbarAPI.pluginCall('music-radio','onLowbarEvent',[{ type:'update', target:'bgModeApply', value:'apply' }]); } catch (e) {} }
+
+      // Init Tab from URL
+      const params = new URLSearchParams(location.search);
+      const tab = params.get('tab');
+      if (tab) switchTab(tab);
+
+      // Init Background UI
+      function updateBgUI(){
+        const mode = String(bgModeEl.value||'blur');
+        blurGroup.style.display = (mode === 'blur') ? 'block' : 'none';
+        shineGroup.style.display = (mode === 'shine') ? 'block' : 'none';
+        flowingGroup.style.display = (mode === 'flowing') ? 'block' : 'none';
+      }
+
+      async function init(){
+        // General
         try {
           const r = await window.lowbarAPI.pluginCall('music-radio', 'getSettings', []);
           const s = (r && r.result ? r.result.settings : (r && r.settings ? r.settings : {}));
-          if (s && s.endTime && endTimeInput) endTimeInput.value = s.endTime;
+          if (s) {
+              if (s.endTime && endTimeInput) endTimeInput.value = s.endTime;
+              if (pauseAtEndTimeInput) pauseAtEndTimeInput.checked = !!s.pauseAtEndTime;
+          }
         } catch (e) {}
-      })();
 
-      if (endTimeInput) {
-        endTimeInput.addEventListener('change', async () => {
-          try { await window.lowbarAPI.pluginCall('music-radio', 'setEndTime', [endTimeInput.value]); } catch (e) {}
-        });
+        // Background
+        bgModeEl.value = String(read('radio.bgmode','blur'));
+        blurEl.value = String(read('radio.bg.blur','70'));
+        darkEl.value = String(read('radio.bg.dark','0.6'));
+        shineReactiveEl.checked = read('radio.shine.audioReactive','1') !== '0';
+        flowingSpeedEl.value = String(read('radio.bg.flowing.speed','1.0'));
+        flowingReactiveEl.checked = read('radio.bg.flowing.audioReactive','0') !== '0';
+        spectrumEnabledEl.checked = read('radio.spectrum.enabled','1') !== '0';
+        updateBgUI();
+        
+        // Download
+        try {
+          const r = await window.lowbarAPI.pluginCall('music-radio', 'getDownloadSettings', []);
+          const s = (r && r.result ? r.result.settings : (r && r.settings ? r.settings : {}));
+          if (s) {
+            if (s.dir) dlDirInput.value = s.dir;
+            if (s.format) dlFormatInput.value = s.format;
+            dlLrcInput.checked = !!s.lrc;
+          }
+        } catch (e) {}
+        refreshDownloads();
       }
 
-      if (openBg) openBg.addEventListener('click', () => {
-        try { window.lowbarAPI.pluginCall('music-radio','onLowbarEvent',[{ type:'click', id:'btn-bgmode' }]); } catch (e) {}
+      // Event Listeners - General
+      if (endTimeInput) endTimeInput.addEventListener('change', async () => {
+        try { await window.lowbarAPI.pluginCall('music-radio', 'setEndTime', [endTimeInput.value]); } catch (e) {}
+      });
+      if (pauseAtEndTimeInput) pauseAtEndTimeInput.addEventListener('change', async () => {
+        try { await window.lowbarAPI.pluginCall('music-radio', 'setPauseAtEndTime', [pauseAtEndTimeInput.checked]); } catch (e) {}
       });
       if (openDebug) openDebug.addEventListener('click', () => {
         try { window.lowbarAPI.pluginCall('music-radio','onLowbarEvent',[{ type:'click', id:'btn-debug-lyrics' }]); } catch (e) {}
       });
+
+      // Event Listeners - Background
+      bgModeEl.addEventListener('change', () => { write('radio.bgmode', bgModeEl.value||'blur'); updateBgUI(); emitApply(); });
+      blurEl.addEventListener('input', () => { write('radio.bg.blur', blurEl.value||'70'); emitApply(); });
+      darkEl.addEventListener('input', () => { write('radio.bg.dark', darkEl.value||'0.6'); emitApply(); });
+      shineReactiveEl.addEventListener('change', () => { write('radio.shine.audioReactive', shineReactiveEl.checked ? '1':'0'); emitApply(); });
+      flowingSpeedEl.addEventListener('input', () => { write('radio.bg.flowing.speed', flowingSpeedEl.value||'1.0'); emitApply(); });
+      flowingReactiveEl.addEventListener('change', () => { write('radio.bg.flowing.audioReactive', flowingReactiveEl.checked ? '1':'0'); emitApply(); });
+      spectrumEnabledEl.addEventListener('change', () => { write('radio.spectrum.enabled', spectrumEnabledEl.checked ? '1':'0'); emitApply(); });
+
+      // Event Listeners - Download
+      if (saveDlBtn) saveDlBtn.onclick = async () => {
+        try {
+          await window.lowbarAPI.pluginCall('music-radio', 'setDownloadSettings', [{
+            dir: dlDirInput.value,
+            format: dlFormatInput.value,
+            lrc: dlLrcInput.checked
+          }]);
+          alert('下载设置已保存');
+        } catch (e) { alert('保存失败'); }
+      };
+      if (browseBtn) browseBtn.onclick = async () => {
+        try {
+          const r = await window.lowbarAPI.pluginCall('music-radio', 'selectDirectory', []);
+          const res = r && r.result ? r.result : r;
+          if (res && res.ok && res.path) dlDirInput.value = res.path;
+        } catch (e) { console.error(e); }
+      };
+
+      init();
     })();
+
+    // Download List Logic
+    window.refreshDownloads = async () => {
+      try {
+        const r = await window.lowbarAPI.pluginCall('music-radio', 'getDownloads', []);
+        const items = (r && r.result ? r.result.items : (r && r.items ? r.items : [])) || [];
+        const el = document.getElementById('dlList');
+        if (!items || !items.length) {
+          el.innerHTML = '<div style="padding:20px; text-align:center; color:var(--muted);">暂无任务</div>';
+          return;
+        }
+        el.innerHTML = '';
+        items.forEach(it => {
+          const div = document.createElement('div');
+          div.className = 'dl-item';
+          let statusColor = 'var(--muted)';
+          let statusText = '等待中';
+          if (it.status === 'downloading') { statusText = '下载中...'; statusColor = 'var(--downloading)'; }
+          else if (it.status === 'completed') { statusText = '已完成'; statusColor = 'var(--success)'; }
+          else if (it.status === 'failed') { statusText = '失败: ' + (it.error || '未知错误'); statusColor = 'var(--error)'; }
+          
+          div.innerHTML = `
+            <div class="dl-info">
+              <div class="dl-title" title="${it.title}">${it.title}</div>
+              <div class="dl-status" style="color:${statusColor}">${statusText}</div>
+            </div>
+            <div style="font-size:12px; color:var(--muted);">${it.status === 'downloading' ? it.progress + '%' : ''}</div>
+          `;
+          el.appendChild(div);
+        });
+      } catch (e) {}
+    };
+
+    // Global Event Listener
+    const ch = 'music-radio';
+    if (window.lowbarAPI.subscribe) {
+      window.lowbarAPI.subscribe(ch);
+      window.lowbarAPI.onEvent((name, payload) => {
+        if (name === ch && payload && payload.type === 'update' && payload.target === 'downloadList') {
+          window.refreshDownloads();
+        }
+      });
+    }
   </script>
 </body>
 </html>

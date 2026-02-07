@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>播放历史</title>
+  <link rel="stylesheet" href="../../../renderer/remixicon-local.css" />
+  <style>
+    :root {
+      --bg: #181818;
+      --fg: #e6e6e6;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --input-bg: #2a2a2a;
+      --accent: #6ab4ff;
+      --hover: #333;
+      --active: #383838;
+      --panel: rgba(255, 255, 255, 0.04);
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; overflow: hidden; }
+    
+    .wrap {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    /* Header */
+    .header {
+        padding: 24px;
+        display: flex;
+        gap: 20px;
+        background: linear-gradient(to bottom, rgba(255,255,255,0.05), transparent);
+        align-items: center;
+        justify-content: space-between;
+    }
+    
+    .title-area {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .title {
+        font-size: 24px;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .subtitle {
+        color: var(--muted);
+        font-size: 14px;
+    }
+
+    .actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+    }
+
+    .date-picker {
+        background: var(--input-bg);
+        border: 1px solid var(--border);
+        color: var(--fg);
+        padding: 6px 10px;
+        border-radius: 6px;
+        outline: none;
+    }
+
+    button {
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--fg);
+        cursor: pointer;
+        font-size: 13px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.2s;
+    }
+    button:hover { background: var(--hover); }
+
+    .menu { margin: 4px 0 10px 40px; padding:8px; border:1px dashed var(--border); border-radius:8px; display:none; background:var(--bg); }
+    .menu .actions { display:flex; gap:10px; flex-wrap: wrap; }
+    .menu .actions button { padding:6px 10px; font-size:12px; border-radius:6px; border:1px solid var(--border); background:var(--active); color:var(--fg); cursor:pointer; }
+    .menu .actions i { margin-right:6px; color:var(--muted); }
+
+    /* List */
+    .list-wrap {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 24px 24px;
+    }
+
+    .list-header {
+        display: grid;
+        grid-template-columns: 40px 1fr 1fr 120px 60px;
+        padding: 8px 12px;
+        color: var(--muted);
+        font-size: 12px;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        background: var(--bg);
+        z-index: 1;
+    }
+
+    .list-item {
+        display: block;
+        padding: 0;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+    }
+    
+    .list-item-content {
+        display: grid;
+        grid-template-columns: 40px 1fr 1fr 120px 60px;
+        padding: 10px 12px;
+        align-items: center;
+        border-radius: 6px;
+    }
+    
+    .list-item-content:hover {
+        background: var(--hover);
+    }
+
+    .idx { color: var(--muted); font-size: 12px; }
+    .song-title { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 12px; }
+    .song-artist { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 12px; }
+    .song-time { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .song-dur { color: var(--muted); font-size: 12px; text-align: right; }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+        <div class="title-area">
+            <h1 class="title">播放历史</h1>
+            <div id="subtitle" class="subtitle">共 0 首歌曲</div>
+        </div>
+        <div class="actions">
+            <input type="date" id="datePicker" class="date-picker" />
+            <button onclick="clearHistory()"><i class="ri-delete-bin-line"></i> 清空当日历史</button>
+        </div>
+    </div>
+    <div class="list-wrap">
+        <div class="list-header">
+            <div>#</div>
+            <div>标题</div>
+            <div>歌手</div>
+            <div>播放时间</div>
+            <div style="text-align:right;">时长</div>
+        </div>
+        <div id="list"></div>
+    </div>
+  </div>
+
+  <script>
+    function getApi() {
+        return window.lowbarAPI || (window.parent && window.parent.lowbarAPI);
+    }
+
+    window.applyTheme = (mode, color) => {
+      const root = document.documentElement;
+      const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      const accent = color || '#6ab4ff';
+      root.style.setProperty('--accent', accent);
+      
+      if (isDark) {
+        root.style.setProperty('--bg', '#181818');
+        root.style.setProperty('--fg', '#e6e6e6');
+        root.style.setProperty('--muted', '#aaa');
+        root.style.setProperty('--border', '#2a2a2a');
+        root.style.setProperty('--input-bg', '#2a2a2a');
+        root.style.setProperty('--hover', '#333');
+        root.style.setProperty('--active', '#383838');
+        root.style.setProperty('--panel', 'rgba(255, 255, 255, 0.04)');
+      } else {
+        root.style.setProperty('--bg', '#ffffff');
+        root.style.setProperty('--fg', '#333333');
+        root.style.setProperty('--muted', '#666666');
+        root.style.setProperty('--border', '#e0e0e0');
+        root.style.setProperty('--input-bg', '#fff');
+        root.style.setProperty('--hover', '#eee');
+        root.style.setProperty('--active', '#e6e6e6');
+        root.style.setProperty('--panel', '#f5f5f5');
+      }
+    };
+
+    (async () => {
+      try {
+        const api = getApi();
+        if (api?.configGet) {
+          const mode = await api.configGet('system', 'themeMode') || 'system';
+          const color = await api.configGet('system', 'themeColor') || '#6ab4ff';
+          window.applyTheme(mode, color);
+        }
+        
+        // Init Date Picker to Today
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        const today = `${y}-${m}-${d}`;
+        document.getElementById('datePicker').value = today;
+        document.getElementById('datePicker').onchange = () => loadHistory();
+        
+        loadHistory();
+      } catch (e) {}
+    })();
+
+    let currentItems = [];
+    let openMenu = null;
+
+    function fmtTime(s) {
+        const m = Math.floor(s / 60);
+        const sec = Math.floor(s % 60);
+        return `${m}:${sec.toString().padStart(2, '0')}`;
+    }
+
+    function fmtDate(ts) {
+        if (!ts) return '';
+        const d = new Date(ts);
+        return d.toLocaleTimeString();
+    }
+
+    async function loadHistory() {
+        const dateStr = document.getElementById('datePicker').value;
+        const api = getApi();
+        if (!api) return;
+        
+        const res = await api.pluginCall('music-radio', 'getHistory', [dateStr]);
+        if (res && res.ok && res.items) {
+            render(res.items);
+        } else {
+            render([]);
+        }
+    }
+    
+    async function clearHistory() {
+        if (!confirm('确定要清空所选日期的历史记录吗？')) return;
+        const dateStr = document.getElementById('datePicker').value;
+        const api = getApi();
+        if (!api) return;
+        await api.pluginCall('music-radio', 'clearHistory', [dateStr]);
+        loadHistory();
+    }
+
+    function render(items) {
+        currentItems = items || [];
+        document.getElementById('subtitle').textContent = `共 ${currentItems.length} 首歌曲`;
+        const listEl = document.getElementById('list');
+        listEl.innerHTML = '';
+        
+        currentItems.forEach((item, i) => {
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            div.onclick = (e) => {
+                e.stopPropagation();
+                if (openMenu && openMenu !== menu) openMenu.style.display = 'none';
+                menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none';
+                openMenu = menu.style.display === 'block' ? menu : null;
+            };
+
+            const content = document.createElement('div');
+            content.className = 'list-item-content';
+            content.innerHTML = `
+                <div class="idx">${currentItems.length - i}</div>
+                <div class="song-title" title="${item.title}">${item.title}</div>
+                <div class="song-artist" title="${item.artist}">${item.artist}</div>
+                <div class="song-time">${fmtDate(item.addedAt)}</div>
+                <div class="song-dur">${fmtTime(item.duration)}</div>
+            `;
+            
+            const menu = document.createElement('div');
+            menu.className = 'menu';
+            
+            const mPlay = document.createElement('button'); mPlay.innerHTML = '<i class="ri-play-fill"></i> 立即播放';
+            const mDelete = document.createElement('button'); mDelete.innerHTML = '<i class="ri-delete-bin-line"></i> 删除记录';
+            
+            function hideMenu(){ menu.style.display = 'none'; openMenu = null; }
+            
+            mPlay.onclick = async (e) => { e.stopPropagation(); hideMenu(); await getApi().pluginCall('music-radio', 'playNow', [item]); };
+            mDelete.onclick = async (e) => { 
+                e.stopPropagation(); 
+                hideMenu(); 
+                const dateStr = document.getElementById('datePicker').value;
+                await getApi().pluginCall('music-radio', 'deleteFromHistory', [dateStr, item.addedAt]); // Use addedAt as unique key
+                loadHistory();
+            };
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+            actions.appendChild(mPlay);
+            actions.appendChild(mDelete);
+            menu.appendChild(actions);
+
+            div.appendChild(content);
+            div.appendChild(menu);
+            listEl.appendChild(div);
+        });
+    }
+    
+    document.addEventListener('click', (e) => {
+        if (openMenu && !openMenu.contains(e.target)) {
+            openMenu.style.display = 'none';
+            openMenu = null;
+        }
+    });
+
+  </script>
+</body>
+</html>

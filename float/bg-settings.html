@@ -6,14 +6,21 @@
   <title>背景设置</title>
   <link rel="stylesheet" href="../../../renderer/remixicon-local.css" />
   <style>
-    html, body { height: 100%; margin: 0; background: #181818; color: #e6e6e6; font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; }
+    :root {
+      --bg: #181818;
+      --fg: #e6e6e6;
+      --muted: #9c9c9c;
+      --border: #2a2a2a;
+      --accent: #6ab4ff;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif; transition: background 0.3s, color 0.3s; }
     .wrap { height: 100%; display: flex; flex-direction: column; }
-    header { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid #2a2a2a; }
+    header { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid var(--border); }
     .content { padding: 16px; display: grid; grid-template-columns: 1fr; gap: 14px; }
     .row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-    .row label { font-size: 14px; color:#cfcfcf; }
+    .row label { font-size: 14px; color:var(--fg); opacity: 0.8; }
     .row select, .row input[type="range"], .row input[type="checkbox"] { width: 160px; }
-    .hint { font-size:12px; color:#9c9c9c; }
+    .hint { font-size:12px; color:var(--muted); }
   </style>
 </head>
 <body>
@@ -51,7 +58,67 @@
     </div>
   </div>
   <script>
+    // 注入主题逻辑
+    window.applyTheme = (mode, color) => {
+      const root = document.documentElement;
+      const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      const accent = color || '#6ab4ff';
+      root.style.setProperty('--accent', accent);
+      if (isDark) {
+        root.style.setProperty('--bg', '#181818');
+        root.style.setProperty('--fg', '#e6e6e6');
+        root.style.setProperty('--muted', '#9c9c9c');
+        root.style.setProperty('--border', '#2a2a2a');
+      } else {
+        root.style.setProperty('--bg', '#ffffff');
+        root.style.setProperty('--fg', '#333333');
+        root.style.setProperty('--muted', '#666666');
+        root.style.setProperty('--border', '#e0e0e0');
+      }
+    };
+
+    (async () => {
+      try {
+        if (window.lowbarAPI?.configGet) {
+          const mode = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+          const color = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+          window.applyTheme(mode, color);
+        }
+        if (window.lowbarAPI?.onConfigChanged) {
+          window.lowbarAPI.onConfigChanged(({ scope, key, value }) => {
+            if (scope === 'system') {
+               (async () => {
+                 const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+                 const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+                 window.applyTheme(m, c);
+               })();
+            }
+          });
+        }
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async () => {
+           const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+           if (m === 'system') {
+              const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+              window.applyTheme('system', c);
+           }
+        });
+      } catch (e) { console.error('Theme init failed', e); }
+    })();
+
     (function(){
+      const updateProgress = (el) => {
+        const min = parseFloat(el.min || 0);
+        const max = parseFloat(el.max || 100);
+        const val = parseFloat(el.value || 0);
+        const ratio = (val - min) / (max - min) * 100;
+        el.style.setProperty('--progress', ratio + '%');
+      };
+
+      document.querySelectorAll('input[type="range"]').forEach(el => {
+        updateProgress(el);
+        el.addEventListener('input', () => updateProgress(el));
+      });
+
       const bgModeEl = document.getElementById('bgMode');
       const blurEl = document.getElementById('blurPx');
       const darkEl = document.getElementById('darkRate');

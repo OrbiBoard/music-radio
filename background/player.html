@@ -3,22 +3,98 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
   <title>播放页面背景</title>
   <link href="https://assets.3r60.top/icons/bootstrap-icons.css" rel="stylesheet" />
   <link rel="stylesheet" href="../../../renderer/remixicon-local.css" />
   <link rel="stylesheet" href="./player.css" />
   <style id="bgRule"></style>
+  <script>
+    // 注入主题逻辑
+    window.applyTheme = (mode, color) => {
+      const root = document.documentElement;
+      const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      
+      const accent = color || '#6ab4ff';
+      root.style.setProperty('--accent', accent);
+      
+      // 播放器组件始终保持深色主题
+      root.style.setProperty('--fg', '#eeeeee');
+      root.style.setProperty('--muted', '#cfcfcf');
+      root.style.setProperty('--panel-bg', 'rgba(0, 0, 0, 0.35)');
+      root.style.setProperty('--border', 'rgba(255, 255, 255, 0.1)');
+      root.style.setProperty('--item-hover', 'rgba(255, 255, 255, 0.05)');
+      root.style.setProperty('--progress-bg', '#222');
+
+      // 仅更新遮罩背景
+      if (isDark) {
+        root.style.setProperty('--overlay-bg', '#000'); // 深色模式下无歌曲遮罩背景
+      } else {
+        root.style.setProperty('--overlay-bg', '#fff'); // 浅色模式下无歌曲遮罩背景
+      }
+    };
+
+    (async () => {
+      try {
+        if (window.lowbarAPI?.configGet) {
+          const mode = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+          const color = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+          window.applyTheme(mode, color);
+        }
+        
+        if (window.lowbarAPI?.onConfigChanged) {
+          window.lowbarAPI.onConfigChanged(({ scope, key, value }) => {
+            if (scope === 'system') {
+               // 重新获取状态并应用（简化处理）
+               (async () => {
+                 const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+                 const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+                 window.applyTheme(m, c);
+               })();
+            }
+          });
+        }
+        
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async () => {
+           const m = await window.lowbarAPI.configGet('system', 'themeMode') || 'system';
+           if (m === 'system') {
+              const c = await window.lowbarAPI.configGet('system', 'themeColor') || '#6ab4ff';
+              window.applyTheme('system', c);
+           }
+        });
+      } catch (e) { console.error('Theme init failed', e); }
+    })();
+  </script>
   <script defer src="./player.js"></script>
   </head>
 <body>
   <div class="wrap">
     <div id="mount" style="position:absolute; inset:0;">
       <div class="content-area">
-        <div id="songLoading" class="loading-wrap"><div class="loading-card"><i class="ri-loader-4-line spin"></i> 正在加载歌曲…</div></div>
-        <div id="emptyOverlay" style="position:fixed; inset:0; z-index:9999; display:none; align-items:center; justify-content:center; background:#000;">
-          <div style="padding:24px 28px; border-radius:16px; color:#e6e6e6;">
+        <div id="songLoading" class="loading-wrap">
+          <div class="loading-card large">
+            <div class="loading-cover-wrap">
+              <div class="loading-cover-placeholder">
+                <i class="ri-music-2-line"></i>
+                <div class="loading-spinner-overlay"><i class="ri-loader-4-line spin"></i></div>
+              </div>
+              <img id="loadingCover" class="loading-cover" src="" style="display:none;" />
+            </div>
+            <div class="loading-info">
+              <div class="loading-title" id="loadingTitle">正在加载歌曲...</div>
+              <div class="loading-artist" id="loadingArtist"></div>
+              <div class="loading-count" id="loadingCount"></div>
+              <div class="loading-actions">
+                <button id="btnCancelLoading" class="loading-btn">取消加载</button>
+                <button id="btnRetryLoading" class="loading-btn" style="display:none;">重试</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="emptyOverlay" style="position:fixed; inset:0; z-index:9999; display:none; align-items:center; justify-content:center; background:var(--overlay-bg);">
+          <div style="padding:24px 28px; border-radius:16px; color:var(--fg);">
             <div style="font-size:22px; font-weight:700; margin-bottom:8px;">暂无播放内容</div>
-            <div style="font-size:14px; color:#cfcfcf;">在底栏打开“搜索”添加歌曲后开始播放</div>
+            <div style="font-size:14px; color:var(--muted);">在底栏打开“搜索”添加歌曲后开始播放</div>
           </div>
         </div>
         <div class="playlist">
@@ -63,9 +139,11 @@
         <div class="audio-bar-inner">
           <div class="audio-time" id="audioTime">0:00/0:00</div>
           <div class="audio-controls" style="margin: 0 auto; display:flex; gap:12px; align-items:center;">
+            <button class="audio-btn sm" id="audioDownloadBtn" title="下载"><i class="ri-download-cloud-2-line"></i></button>
             <button class="audio-btn" id="audioPrevBtn" title="上一首"><i class="ri-skip-back-fill"></i></button>
-            <button class="audio-btn" id="audioPlayBtn" title="播放/暂停"><i class="ri-play-fill"></i></button>
+            <button class="audio-btn rounded" id="audioPlayBtn" title="播放/暂停"><i class="ri-play-fill"></i></button>
             <button class="audio-btn" id="audioNextBtn" title="下一首"><i class="ri-skip-forward-fill"></i></button>
+            <button class="audio-btn sm" id="audioModeBtn" title="播放模式"><i class="ri-order-play-line"></i></button>
           </div>
         </div>
         <div class="audio-spectrum"><canvas id="audioSpectrum"></canvas></div>

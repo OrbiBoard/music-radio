@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>歌单详情</title>
+  <link rel="stylesheet" href="../../../renderer/remixicon-local.css" />
+  <style>
+    :root {
+      --bg: #181818;
+      --fg: #e6e6e6;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --input-bg: #2a2a2a;
+      --accent: #6ab4ff;
+      --hover: #333;
+      --active: #383838;
+      --panel: rgba(255, 255, 255, 0.04);
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; overflow: hidden; }
+    
+    .wrap {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    /* Header */
+    .header {
+        padding: 24px;
+        display: flex;
+        gap: 20px;
+        background: linear-gradient(to bottom, rgba(255,255,255,0.05), transparent);
+    }
+    
+    .cover {
+        width: 140px;
+        height: 140px;
+        border-radius: 8px;
+        background: var(--panel);
+        object-fit: cover;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+
+    .info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .title {
+        font-size: 24px;
+        font-weight: 600;
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .author {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 13px;
+    }
+
+    .desc {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .actions {
+        margin-top: 12px;
+        display: flex;
+        gap: 12px;
+    }
+
+    button {
+        padding: 8px 16px;
+        border-radius: 999px;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.2s;
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: #fff;
+    }
+    .btn-primary:hover { filter: brightness(1.1); }
+
+    .btn-secondary {
+        background: rgba(255,255,255,0.1);
+        color: var(--fg);
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+
+    .menu { margin: 0 0 10px 40px; padding:6px 8px; border:1px dashed var(--border); border-radius:8px; display:none; background:var(--bg); }
+    .menu .actions { display:flex; gap:10px; flex-wrap: wrap; }
+    .menu .actions button { padding:6px 10px; font-size:12px; border-radius:6px; border:1px solid var(--border); background:var(--active); color:var(--fg); cursor:pointer; transition: filter 0.2s; }
+    .menu .actions button:hover { filter: brightness(1.2); }
+    .menu .actions i { margin-right:6px; color:var(--muted); }
+
+    /* List */
+    .list-wrap {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 24px 24px;
+    }
+
+    .list-header {
+        display: grid;
+        grid-template-columns: 40px 1fr 1fr 60px;
+        padding: 8px 12px;
+        color: var(--muted);
+        font-size: 12px;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        background: var(--bg);
+        z-index: 1;
+    }
+
+    .list-item {
+        display: block;
+        padding: 0;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+    }
+    
+    .list-item-content {
+        display: grid;
+        grid-template-columns: 40px 1fr 1fr 60px 40px;
+        padding: 10px 12px;
+        align-items: center;
+        border-radius: 6px;
+    }
+    
+    .list-item-content:hover {
+        background: var(--hover);
+    }
+
+    .idx { color: var(--muted); font-size: 12px; }
+    .song-title { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 12px; }
+    .song-artist { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 12px; }
+    .song-dur { color: var(--muted); font-size: 12px; text-align: right; }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+        <img id="cover" class="cover" src="" />
+        <div class="info">
+            <h1 id="title" class="title">加载中...</h1>
+            <div id="author" class="author"><i class="ri-user-3-line"></i> <span>—</span></div>
+            <div id="desc" class="desc"></div>
+            <div class="actions">
+                <button class="btn-primary" onclick="playAll()"><i class="ri-play-fill"></i> 播放全部</button>
+                <button class="btn-secondary" onclick="enqueueAll()"><i class="ri-play-list-add-line"></i> 插入到队列尾部</button>
+            </div>
+        </div>
+    </div>
+    <div class="list-wrap">
+        <div class="list-header">
+            <div>#</div>
+            <div>标题</div>
+            <div>歌手</div>
+            <div style="text-align:right;">时长</div>
+            <div></div>
+        </div>
+        <div id="list"></div>
+    </div>
+  </div>
+
+  <script>
+    // --- Theme Logic ---
+    function getApi() {
+        return window.lowbarAPI || (window.parent && window.parent.lowbarAPI);
+    }
+
+    window.applyTheme = (mode, color) => {
+      const root = document.documentElement;
+      const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      const accent = color || '#6ab4ff';
+      root.style.setProperty('--accent', accent);
+      
+      if (isDark) {
+        root.style.setProperty('--bg', '#181818');
+        root.style.setProperty('--fg', '#e6e6e6');
+        root.style.setProperty('--muted', '#aaa');
+        root.style.setProperty('--border', '#2a2a2a');
+        root.style.setProperty('--input-bg', '#2a2a2a');
+        root.style.setProperty('--hover', '#333');
+        root.style.setProperty('--active', '#383838');
+        root.style.setProperty('--panel', 'rgba(255, 255, 255, 0.04)');
+      } else {
+        root.style.setProperty('--bg', '#ffffff');
+        root.style.setProperty('--fg', '#333333');
+        root.style.setProperty('--muted', '#666666');
+        root.style.setProperty('--border', '#e0e0e0');
+        root.style.setProperty('--input-bg', '#fff');
+        root.style.setProperty('--hover', '#eee');
+        root.style.setProperty('--active', '#e6e6e6');
+        root.style.setProperty('--panel', '#f5f5f5');
+      }
+    };
+
+    (async () => {
+      try {
+        const api = getApi();
+        if (api?.configGet) {
+          const mode = await api.configGet('system', 'themeMode') || 'system';
+          const color = await api.configGet('system', 'themeColor') || '#6ab4ff';
+          window.applyTheme(mode, color);
+        }
+      } catch (e) {}
+    })();
+
+    let currentItems = [];
+    let openMenu = null;
+
+    function fmtTime(s) {
+        const m = Math.floor(s / 60);
+        const sec = Math.floor(s % 60);
+        return `${m}:${sec.toString().padStart(2, '0')}`;
+    }
+
+    function render(info) {
+        if (!info) return;
+        document.getElementById('title').textContent = info.title || '未知歌单';
+        document.getElementById('cover').src = info.cover || '';
+        document.querySelector('#author span').textContent = info.author || '未知作者';
+        document.getElementById('desc').textContent = info.desc || '';
+        
+        currentItems = info.items || [];
+        const listEl = document.getElementById('list');
+        listEl.innerHTML = '';
+        
+        currentItems.forEach((item, i) => {
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            // Logic to toggle menu
+            div.onclick = (e) => {
+                e.stopPropagation();
+                if (openMenu && openMenu !== menu) openMenu.style.display = 'none';
+                menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none';
+                openMenu = menu.style.display === 'block' ? menu : null;
+            };
+
+            const content = document.createElement('div');
+            content.className = 'list-item-content';
+            content.innerHTML = `
+                <div class="idx">${i + 1}</div>
+                <div class="song-title" title="${item.title}">${item.title}</div>
+                <div class="song-artist" title="${item.artist}">${item.artist}</div>
+                <div class="song-dur">${fmtTime(item.duration)}</div>
+            `;
+            
+            const btnExpand = document.createElement('button');
+            btnExpand.innerHTML = '<i class="ri-more-2-fill"></i>';
+            btnExpand.style.padding = '4px';
+            btnExpand.style.fontSize = '16px';
+            btnExpand.style.background = 'transparent';
+            btnExpand.style.border = 'none';
+            btnExpand.style.color = 'var(--muted)';
+            btnExpand.style.cursor = 'pointer';
+            btnExpand.onclick = (e) => {
+                e.stopPropagation();
+                if (openMenu && openMenu !== menu) openMenu.style.display = 'none';
+                menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none';
+                openMenu = menu.style.display === 'block' ? menu : null;
+            };
+            btnExpand.onmouseenter = () => { btnExpand.style.color = 'var(--fg)'; };
+            btnExpand.onmouseleave = () => { btnExpand.style.color = 'var(--muted)'; };
+            content.appendChild(btnExpand);
+            
+            const menu = document.createElement('div');
+            menu.className = 'menu';
+            // Actions
+            const mTail = document.createElement('button'); mTail.innerHTML = '<i class="ri-play-list-2-line"></i> 插入到歌单尾部';
+            const mPlay = document.createElement('button'); mPlay.innerHTML = '<i class="ri-play-fill"></i> 立即播放';
+            const mNext = document.createElement('button'); mNext.innerHTML = '<i class="ri-skip-forward-fill"></i> 下一首播放';
+            const mDownload = document.createElement('button'); mDownload.innerHTML = '<i class="ri-download-line"></i> 下载歌曲';
+            
+            function hideMenu(){ menu.style.display = 'none'; openMenu = null; }
+            function hideFloating(){ try { getApi().emitEvent('music-radio', { type:'update', target:'floatingUrl', value: null }); } catch (e) {} }
+            
+            mTail.onclick = async (e) => { e.stopPropagation(); hideMenu(); hideFloating(); await getApi().pluginCall('music-radio', 'enqueueTail', [item]); };
+            mPlay.onclick = async (e) => { e.stopPropagation(); hideMenu(); hideFloating(); await getApi().pluginCall('music-radio', 'playNow', [item]); };
+            mNext.onclick = async (e) => { e.stopPropagation(); hideMenu(); hideFloating(); await getApi().pluginCall('music-radio', 'enqueueNext', [item]); };
+            mDownload.onclick = async (e) => { e.stopPropagation(); if(confirm(`确认下载 "${item.title}" 吗？`)) { await getApi().pluginCall('music-radio', 'downloadSong', [item]); } };
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+            actions.appendChild(mTail);
+            actions.appendChild(mPlay);
+            actions.appendChild(mNext);
+            actions.appendChild(mDownload);
+            menu.appendChild(actions);
+
+            div.innerHTML = '';
+            div.appendChild(content);
+            div.appendChild(menu);
+            listEl.appendChild(div);
+        });
+    }
+
+    async function playItem(index) {
+        // Deprecated by menu, but kept for compatibility if needed
+    }
+
+    window.enqueueAll = async () => {
+        if (!currentItems.length) return;
+        try {
+            const api = getApi();
+            if (!api) return;
+            if(confirm(`确认将 ${currentItems.length} 首歌曲添加到播放队列尾部吗？`)) {
+                for (let i = 0; i < currentItems.length; i++) {
+                    await api.pluginCall('music-radio', 'enqueueTail', [currentItems[i]]);
+                }
+                alert('已添加');
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    window.playAll = async () => {
+        if (!currentItems.length) return;
+        try {
+            const api = getApi();
+            if (!api) return;
+            // Play first, enqueue rest?
+            // Usually we replace playlist? 
+            // music-radio doesn't have "replacePlaylist" easily exposed, but we can do playNow(0) then enqueueNext?
+            // Actually playNow appends to end and plays.
+            // Let's just play the first one for now, or enqueue all.
+            // A better way for "Play All":
+            // 1. Play first item
+            // 2. Enqueue others
+            
+            await api.pluginCall('music-radio', 'playNow', [currentItems[0]]);
+            for (let i = 1; i < currentItems.length; i++) {
+                await api.pluginCall('music-radio', 'enqueueTail', [currentItems[i]]);
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    // Load data
+    (async () => {
+        // 1. Try getTempPlaylist
+        try {
+            const api = getApi();
+            if (api) {
+                const r = await api.pluginCall('music-radio', 'getTempPlaylist', []);
+                if (r && r.result && r.result.data) {
+                    render(r.result.data);
+                }
+            }
+        } catch (e) {}
+
+        // 2. Listen for event
+        const api = getApi();
+        if (api && api.subscribe) {
+            api.subscribe('music-radio');
+            api.onEvent((name, payload) => {
+                if (name === 'music-radio' && payload && payload.type === 'playlistData') {
+                    render(payload.value);
+                }
+            });
+        }
+    })();
+  </script>
+</body>
+</html>

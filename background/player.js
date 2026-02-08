@@ -152,12 +152,9 @@ window.addEventListener('DOMContentLoaded', () => {
       const style = document.getElementById('EX_bg_flowing_style');
       if (!style) return;
       const speed = Math.max(0.1, parseFloat(localStorage.getItem('radio.bg.flowing.speed')||'1.0'));
-      const baseDur = 15 / speed;
+      const baseDur = 45 / speed;
       const dur = baseDur / Math.max(0.5, Math.min(2.0, k)); // higher k = faster (lower duration)
-      
-      let txt = String(style.textContent||'');
-      txt = txt.replace(/animation: flowing-bg [0-9.]+s/, `animation: flowing-bg ${dur.toFixed(2)}s`);
-      style.textContent = txt;
+      document.body.style.setProperty('--bg-flow-dur', `${dur.toFixed(2)}s`);
   }
   function setupAudioAnalysis(){
     if (!audio) return;
@@ -250,8 +247,10 @@ window.addEventListener('DOMContentLoaded', () => {
       if (flux>thr && (now - lastPeakTs) > 250){ lastPeakTs = now; peakTimes.push(now); while (peakTimes.length && (now - peakTimes[0]) > 8000) peakTimes.shift(); }
       const shineReactive = (String(localStorage.getItem('radio.shine.audioReactive')||'1') !== '0');
       const flowingReactive = (String(localStorage.getItem('radio.bg.flowing.audioReactive')||'0') !== '0');
+      const bgMode = localStorage.getItem('radio.bgmode');
+      const isFlowing = bgMode === 'flowing';
       
-      if ((shineReactive || flowingReactive) && (now - lastTempoTs > 1000)){
+      if ((shineReactive || isFlowing) && (now - lastTempoTs > 1000)){
         lastTempoTs = now;
         let bpm = 0;
         if (peakTimes.length >= 2){ const span = (peakTimes[peakTimes.length-1] - peakTimes[0]) / 1000; const count = peakTimes.length - 1; if (span>0) bpm = (count/span)*60; }
@@ -261,7 +260,12 @@ window.addEventListener('DOMContentLoaded', () => {
         tempoSmooth = tempoSmooth ? (tempoSmooth*0.9 + k*0.1) : k;
         const kClamped = Math.max(minF, Math.min(maxF, tempoSmooth));
         if (shineReactive) updateRotateDurations(kClamped);
-        if (flowingReactive) updateFlowingDuration(kClamped);
+        
+        if (flowingReactive) {
+            updateFlowingDuration(kClamped);
+        } else if (isFlowing) {
+            updateFlowingDuration(1.0);
+        }
       }
       const volBoost = Math.max(1, parseFloat(localStorage.getItem('radio.volume.boost')||'14'));
       const volSmooth = Math.min(0.99, Math.max(0, parseFloat(localStorage.getItem('radio.volume.smoothing')||'0.7')));
@@ -479,10 +483,9 @@ window.addEventListener('DOMContentLoaded', () => {
         const colorCounts = {};
         for (let i=0; i<data.length; i+=4) {
             const r = data[i]; const g = data[i+1]; const b = data[i+2];
-            // Quantize to 64-level for better grouping
-            const qr = Math.floor(r/64)*64;
-            const qg = Math.floor(g/64)*64;
-            const qb = Math.floor(b/64)*64;
+            const qr = Math.floor(r/32)*32;
+            const qg = Math.floor(g/32)*32;
+            const qb = Math.floor(b/32)*32;
             const key = `${qr},${qg},${qb}`;
             if (!colorCounts[key]) colorCounts[key] = { count: 0, r:0, g:0, b:0 };
             colorCounts[key].count++;
@@ -491,34 +494,65 @@ window.addEventListener('DOMContentLoaded', () => {
             colorCounts[key].b += b;
         }
         
-        const sorted = Object.values(colorCounts).sort((a,b) => b.count - a.count);
-        let c1 = sorted[0];
-        let c2 = sorted.length > 1 ? sorted[1] : c1;
+        let sorted = Object.values(colorCounts).sort((a,b) => b.count - a.count);
         
-        // Try to find a secondary color that is distinct
-        for (let i=1; i<sorted.length; i++) {
-             const t = sorted[i];
-             const dr = (t.r/t.count) - (c1.r/c1.count);
-             const dg = (t.g/t.count) - (c1.g/c1.count);
-             const db = (t.b/t.count) - (c1.b/c1.count);
-             const dist = Math.sqrt(dr*dr + dg*dg + db*db);
-             if (dist > 40) { c2 = t; break; }
-        }
-
-        const process = (c) => {
-            if (!c) return { r:100, g:180, b:255, str:'#6ab4ff' };
-            let r = Math.floor(c.r/c.count);
-            let g = Math.floor(c.g/c.count);
-            let b = Math.floor(c.b/c.count);
-            const max = Math.max(r, g, b); const min = Math.min(r, g, b);
-            if (max - min < 20) { r=Math.min(255,r+20); g=Math.min(255,g+20); b=Math.min(255,b+30); } 
-            return { r, g, b, str: `rgb(${r},${g},${b})` };
+        const getAvg = (c) => {
+             if (!c) return { r:0, g:0, b:0 };
+             return { r: Math.floor(c.r/c.count), g: Math.floor(c.g/c.count), b: Math.floor(c.b/c.count) };
         };
+
+        const getDist = (c1, c2) => {
+             const dr = c1.r - c2.r;
+             const dg = c1.g - c2.g;
+             const db = c1.b - c2.b;
+             return Math.sqrt(dr*dr + dg*dg + db*db);
+        };
+
+        const finalColors = [];
+        if (sorted.length > 0) finalColors.push(getAvg(sorted[0]));
         
-        const p1 = process(c1);
-        const p2 = process(c2);
-        return { ...p1, r2: p2.r, g2: p2.g, b2: p2.b, str2: p2.str };
-    } catch (e) { return { r:100, g:180, b:255, str:'#6ab4ff', r2:80, g2:160, b2:240, str2:'#50a0f0' }; }
+        let searchIdx = 1;
+        // Search for up to 7 distinct colors
+        while (finalColors.length < 7 && searchIdx < sorted.length) {
+             const candidate = getAvg(sorted[searchIdx]);
+             let isDistinct = true;
+             for (const existing of finalColors) {
+                 if (getDist(candidate, existing) < 25) { // Slightly lowered threshold
+                     isDistinct = false;
+                     break;
+                 }
+             }
+             if (isDistinct) finalColors.push(candidate);
+             searchIdx++;
+        }
+        
+        while (finalColors.length < 7) {
+             const base = finalColors.length > 0 ? finalColors[0] : {r:128,g:128,b:128};
+             finalColors.push({
+                 r: Math.max(0, Math.min(255, base.r + (Math.random()*100-50))),
+                 g: Math.max(0, Math.min(255, base.g + (Math.random()*100-50))),
+                 b: Math.max(0, Math.min(255, base.b + (Math.random()*100-50)))
+             });
+        }
+        
+        const res = {};
+        finalColors.forEach((c, i) => {
+             let { r, g, b } = c;
+             const max = Math.max(r, g, b); const min = Math.min(r, g, b);
+             if (max - min < 20) { r=Math.min(255,r+20); g=Math.min(255,g+20); b=Math.min(255,b+30); }
+             
+             const idx = i === 0 ? '' : (i + 1);
+             res[`r${idx}`] = r;
+             res[`g${idx}`] = g;
+             res[`b${idx}`] = b;
+             res[`str${idx}`] = `rgb(${r},${g},${b})`;
+        });
+        if (!res.str) res.str = res.str1 || 'rgb(100,100,100)';
+        
+        return res;
+    } catch (e) { 
+        return { r:100, g:180, b:255, str:'#6ab4ff', r2:80, g2:160, b2:240, str2:'#50a0f0', r3:60, g3:140, b3:220, r4:40, g4:120, b4:200, r5:20, g5:100, b5:180, r6:10, g6:80, b6:160, r7:5, g7:60, b7:140 }; 
+    }
   }
 
   function applyThemeColors(imgUrl) {
@@ -533,17 +567,17 @@ window.addEventListener('DOMContentLoaded', () => {
         root.style.setProperty('--theme-r', c.r);
         root.style.setProperty('--theme-g', c.g);
         root.style.setProperty('--theme-b', c.b);
-        root.style.setProperty('--theme-r2', c.r2);
-        root.style.setProperty('--theme-g2', c.g2);
-        root.style.setProperty('--theme-b2', c.b2);
+        for(let i=2; i<=7; i++) {
+            root.style.setProperty(`--theme-r${i}`, c[`r${i}`]);
+            root.style.setProperty(`--theme-g${i}`, c[`g${i}`]);
+            root.style.setProperty(`--theme-b${i}`, c[`b${i}`]);
+        }
         
-        // Update specific elements
         const progress = document.getElementById('audioProgress');
         const dot = document.getElementById('audioProgressDot');
         if (progress) progress.style.background = c.str;
         if (dot) dot.style.background = c.str;
         
-        // Playlist active item styling is handled by CSS using --theme-color if we update the CSS
         const style = document.getElementById('playlist-theme-style');
         if (!style) {
             const s = document.createElement('style');
@@ -552,11 +586,9 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         document.getElementById('playlist-theme-style').textContent = `
             #playlist .item.active { border-left-color: ${c.str} !important; background: rgba(${c.r},${c.g},${c.b},0.2) !important; }
-            #playlist .item.active .title { color: ${c.str} !important; }
             .theme-text { color: ${c.str} !important; }
         `;
         
-        // Re-apply background if in gradient/flowing mode
         applyBackgroundCurrent(); 
     };
   }
@@ -571,21 +603,29 @@ window.addEventListener('DOMContentLoaded', () => {
       if (!style) { style = document.createElement('style'); style.id = 'EX_bg_flowing_style'; document.head.appendChild(style); }
       
       const speed = Math.max(0.1, parseFloat(localStorage.getItem('radio.bg.flowing.speed')||'1.0'));
-      const dur = 15 / speed;
+      const dur = 45 / speed;
+      document.body.style.setProperty('--bg-flow-dur', `${dur}s`);
       
       style.textContent = `
           body::before {
-              content: ''; position: absolute; inset: -50%; 
-              background: radial-gradient(circle at center, rgba(${c.r},${c.g},${c.b},0.6), transparent 60%),
-                          linear-gradient(45deg, rgba(${c.r2},${c.g2},${c.b2},0.3), rgba(0,0,0,0.8));
+              content: ''; position: absolute; inset: -100%; 
+              background: 
+                  radial-gradient(at 20% 20%, rgba(${c.r},${c.g},${c.b},0.7) 0px, transparent 50%),
+                  radial-gradient(at 80% 20%, rgba(${c.r2},${c.g2},${c.b2},0.7) 0px, transparent 50%),
+                  radial-gradient(at 80% 80%, rgba(${c.r3},${c.g3},${c.b3},0.7) 0px, transparent 50%),
+                  radial-gradient(at 20% 80%, rgba(${c.r4},${c.g4},${c.b4},0.7) 0px, transparent 50%),
+                  radial-gradient(at 50% 50%, rgba(${c.r5},${c.g5},${c.b5},0.7) 0px, transparent 50%),
+                  radial-gradient(at 10% 50%, rgba(${c.r6||c.r},${c.g6||c.g},${c.b6||c.b},0.7) 0px, transparent 50%),
+                  radial-gradient(at 90% 50%, rgba(${c.r7||c.r2},${c.g7||c.g2},${c.b7||c.b2},0.7) 0px, transparent 50%),
+                  #000;
+              background-size: 100% 100%;
               z-index: -1;
-              animation: flowing-bg ${dur}s ease-in-out infinite alternate;
-              filter: blur(40px);
+              animation: flowing-rotate var(--bg-flow-dur) linear infinite;
+              filter: blur(80px);
           }
-          @keyframes flowing-bg {
-              0% { transform: translate(0,0) scale(1); }
-              50% { transform: translate(10px, 20px) scale(1.1); }
-              100% { transform: translate(-10px, -10px) scale(1); }
+          @keyframes flowing-rotate {
+              from { transform: rotate(0deg); }
+              to { transform: rotate(360deg); }
           }
       `;
   }
@@ -609,10 +649,16 @@ window.addEventListener('DOMContentLoaded', () => {
             const b = getComputedStyle(document.documentElement).getPropertyValue('--theme-b') || 100;
             applyGradientBackground({r,g,b});
         } else if (mode === 'flowing') {
-            const r = getComputedStyle(document.documentElement).getPropertyValue('--theme-r') || 100;
-            const g = getComputedStyle(document.documentElement).getPropertyValue('--theme-g') || 100;
-            const b = getComputedStyle(document.documentElement).getPropertyValue('--theme-b') || 100;
-            applyFlowingBackground({r,g,b});
+            const colors = {};
+            colors.r = getComputedStyle(document.documentElement).getPropertyValue('--theme-r') || 100;
+            colors.g = getComputedStyle(document.documentElement).getPropertyValue('--theme-g') || 100;
+            colors.b = getComputedStyle(document.documentElement).getPropertyValue('--theme-b') || 100;
+            for(let i=2; i<=7; i++) {
+                colors[`r${i}`] = getComputedStyle(document.documentElement).getPropertyValue(`--theme-r${i}`) || 80;
+                colors[`g${i}`] = getComputedStyle(document.documentElement).getPropertyValue(`--theme-g${i}`) || 80;
+                colors[`b${i}`] = getComputedStyle(document.documentElement).getPropertyValue(`--theme-b${i}`) || 80;
+            }
+            applyFlowingBackground(colors);
         } else {
             // blur (default)
             if (src) applyBlurBackground(src);
@@ -864,7 +910,81 @@ function mountYrc2_pair(yrc) {
     if (window._lyricsRaf) cancelAnimationFrame(window._lyricsRaf);
     el.innerHTML = '';
     const AUTO_SCROLL_PAUSE_MS = 4000;
-    const seq = Array.isArray(yrc) ? yrc.slice() : [];
+    // Pre-process: Pairing logic (borrowed from pair mode)
+    const sorted = Array.isArray(yrc) ? yrc.slice().sort((a, b) => (parseInt(a.t || 0, 10) || 0) - (parseInt(b.t || 0, 10) || 0)) : [];
+    const textOf = (line) => (line && Array.isArray(line.c)) ? line.c.map(w=>String(w.tx||'')).join('') : '';
+    const hasWordTiming = (line) => Array.isArray(line?.c) && line.c.some(w => (parseInt(w.d||0,10)||0) > 0);
+    
+    const timed = sorted.filter(l => hasWordTiming(l));
+    const rest = sorted.filter(l => !hasWordTiming(l));
+    const PAIR_MS = Math.max(100, parseInt(localStorage.getItem('radio.lyric.pair.ms')||'600',10)||600);
+    const backMs = Math.max(0, parseInt(localStorage.getItem('radio.lyric.back.ms')||'300',10)||300);
+    const assigned = new Map();
+    const restAssigned = new Set();
+    
+    // 1. Index-based Matching (Primary Strategy for 1:1 mapping)
+    // Many sources (like Kuwo) have 1:1 line count, but bad timestamps.
+    // If counts are equal (or very close), we prioritize index alignment.
+    
+    // If user requested "force index -1", it implies they see a shift.
+    // Based on analysis: Line[i] was getting Trans[i-1]. Correct is Line[i] -> Trans[i].
+    // This is "Index Matching".
+    
+    let useIndexMatching = false;
+    if (Math.abs(timed.length - rest.length) <= 2) {
+        useIndexMatching = true;
+    }
+    
+    if (useIndexMatching) {
+        const count = Math.min(timed.length, rest.length);
+        for (let i = 0; i < count; i++) {
+            assigned.set(timed[i], rest[i]);
+            restAssigned.add(rest[i]);
+        }
+    } else {
+        // Fallback to Time-based Nearest Neighbor
+        const SEARCH_WIN = 3000; 
+        for (let k = 0; k < timed.length; k++) {
+            const origin = timed[k];
+            const t0 = parseInt(origin.t || 0, 10) || 0;
+            
+            const candidates = [];
+            for (let i = 0; i < rest.length; i++) {
+                const r = rest[i]; 
+                if (restAssigned.has(r)) continue;
+                if (textOf(r) === textOf(origin)) continue;
+                
+                const tr = parseInt(r.t || 0, 10) || 0;
+                const diff = Math.abs(tr - t0);
+                
+                if (diff <= SEARCH_WIN) {
+                    candidates.push({ line: r, diff: diff });
+                }
+            }
+            
+            candidates.sort((a,b) => a.diff - b.diff);
+            
+            if (candidates.length > 0) {
+                const best = candidates[0].line;
+                assigned.set(origin, best);
+                restAssigned.add(best);
+            }
+        }
+    }
+    
+    // Build final sequence: Timed lines (with trans attached) + Unassigned Rest lines
+    const finalSeq = [];
+    const processedOrigin = new Set();
+    
+    sorted.forEach(line => {
+        if (restAssigned.has(line)) return; // Skip if used as translation
+        if (processedOrigin.has(line)) return;
+        
+        const trans = assigned.get(line);
+        finalSeq.push({ origin: line, trans: trans });
+        processedOrigin.add(line);
+    });
+
       // Init Styles for Karaoke effect
       if (!document.getElementById('karaoke-style')) {
           const s = document.createElement('style');
@@ -873,8 +993,6 @@ function mountYrc2_pair(yrc) {
             .karaoke-word {
                position: relative;
                display: inline-block;
-               /* background-clip: text; -webkit-background-clip: text; color: transparent; background-image: ... */
-               /* Better approach: use ::after overlay */
             }
             .karaoke-word::after {
              content: attr(data-text); position: absolute; left: 0; top: 0;
@@ -892,22 +1010,31 @@ function mountYrc2_pair(yrc) {
              opacity: 1;
              text-shadow: 0 0 15px rgba(255,255,255,0.8), 0 0 5px rgba(255,255,255,0.4);
           }
-          .row.origin span { position: relative; color: rgba(255,255,255,0.55); }
-          .row.trans { font-size: 0.9em; opacity: 0.8; line-height: 1.2; }
-          /* Override base line margin to ensure tightness */
-          #lyrics .line { margin: 6px 0; }
-          #lyrics .line.trans-line { margin-top: -8px; margin-bottom: 42px; }
+          .row.origin span { position: relative; color: rgba(255,255,255,0.55); transition: color 0.2s; }
+          .row.trans { font-size: 0.9em; opacity: 0.8; line-height: 1.2; margin-top: 10px; }
           
-          .waiting-dots {
-             display: inline-block; margin-left: 10px; opacity: 0; transition: opacity 0.5s;
+          /* Highlight active origin line when translation exists */
+          .line.active .row.origin {
+             transform: scale(1.02); transform-origin: left center;
+             transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+             text-shadow: 0 0 12px rgba(255,255,255,0.25);
           }
-          .waiting-dots.show { opacity: 1; }
-          .waiting-dots span {
-             display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.6);
-             margin: 0 3px; opacity: 0; transform: scale(0); transition: opacity 0.3s, transform 0.3s;
+          .line.active .row.origin span { color: rgba(255,255,255,0.95); }
+
+          /* Layout Spacing */
+          #lyrics .line { margin: 24px 0; transition: margin 0.2s; }
+          #lyrics .line.single-line { margin: 36px 0; }
+          
+          .waiting-dots-line {
+             text-align: left; padding: 12px 0; opacity: 0; transition: opacity 0.3s;
           }
-          .waiting-dots span.active {
-             opacity: 1; transform: scale(1);
+          .waiting-dots-line.show { opacity: 1; }
+          .waiting-dots-line span {
+             display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.5);
+             margin: 0 6px; opacity: 0; transform: scale(0); transition: opacity 0.2s, transform 0.2s;
+          }
+          .waiting-dots-line span.active {
+             opacity: 1; transform: scale(1.3); background: rgba(255,255,255,0.9); box-shadow: 0 0 8px rgba(255,255,255,0.6);
           }
           `;
           document.head.appendChild(s);
@@ -924,117 +1051,148 @@ function mountYrc2_pair(yrc) {
           s.dataset.t = w.t; 
           s.dataset.d = w.d;
           if (kind === 'origin') s.classList.add('karaoke-word');
-          // s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; 
-          // s.style.opacity = '0.55'; // Controlled by CSS now for base color
-          s.style.display = 'inline-block'; // Changed to inline-block for transform
+          s.style.display = 'inline-block'; 
           row.appendChild(s); 
           const next = line.c[i + 1]; 
           if (next && needSpace(w.tx, next.tx)) row.appendChild(document.createTextNode(' ')); 
       });
       return row;
     }
-    const hasWordTiming = (line) => Array.isArray(line?.c) && line.c.some(w => (parseInt(w.d||0,10)||0) > 0);
-    const anyTimed = seq.some(l => hasWordTiming(l));
-    seq.forEach(line => {
+    
+    finalSeq.forEach(item => {
+      const line = item.origin;
+      const trans = item.trans;
+      
       const c = document.createElement('div');
       c.className = 'line';
       const lt = parseInt(line.t || 0, 10) || 0;
-      const ld = parseInt(line.d || 0, 10) || 0;
+      let ld = parseInt(line.d || 0, 10) || 0;
+      if (trans) {
+          const td = parseInt(trans.d || 0, 10) || 0;
+          ld = Math.max(ld, td);
+      }
+      
       c.dataset.t = String(lt);
       c.dataset.d = String(ld);
-      const kind = (anyTimed && !hasWordTiming(line)) ? 'trans' : 'origin';
-      if (kind === 'trans') c.classList.add('trans-line');
-      const r = makeRow(line, kind);
-      c.appendChild(r);
-      if (kind === 'origin') {
-         const dots = document.createElement('div');
-         dots.className = 'waiting-dots';
-         dots.innerHTML = '<span></span><span></span><span></span>';
-         c.appendChild(dots);
+      
+      if (!trans) c.classList.add('single-line');
+      
+      const r1 = makeRow(line, 'origin');
+      c.appendChild(r1);
+      
+      if (trans) {
+          const r2 = makeRow(trans, 'trans');
+          c.appendChild(r2);
       }
+      
       c.onclick = () => { try { audio.currentTime = (parseInt(c.dataset.t || '0', 10)) / 1000; } catch (e) { } };
       el.appendChild(c);
     });
+    
     let userScrollTs = 0; let touchStartY = 0;
     el.addEventListener('wheel', () => { userScrollTs = Date.now(); });
     el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length === 1) { touchStartY = e.touches[0].clientY; } });
     el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } });
+    
+    let dotsLine = null;
+    function getDotsLine() {
+        if (dotsLine) return dotsLine;
+        dotsLine = document.createElement('div');
+        dotsLine.className = 'line waiting-dots-line';
+        dotsLine.innerHTML = '<span></span><span></span><span></span>';
+        return dotsLine;
+    }
+
     function update() {
       const t = audio.currentTime * 1000;
-      const lines = Array.from(el.querySelectorAll('.line'));
+      const lines = Array.from(el.querySelectorAll('.line:not(.waiting-dots-line)'));
       let active = null;
-      let gapLine = null;
+      let gapNextLine = null;
 
       for (let i = 0; i < lines.length; i++) {
          const c = lines[i];
          const lt = parseInt(c.dataset.t || '0', 10);
          const ld = parseInt(c.dataset.d || '0', 10);
-         const next = lines[i+1];
-         const nextT = next ? parseInt(next.dataset.t||'0', 10) : Infinity;
-
-         if (t >= lt && t < lt + ld) {
+         const le = lt + ld;
+         
+         if (t >= lt && t < le) {
              active = c;
-         } else if (t >= lt + ld && t < nextT) {
-             gapLine = c;
+             break; // Found active line
          }
          
-         // Reset dots
-         const dots = c.querySelector('.waiting-dots');
-         if (dots) {
-             dots.classList.remove('show');
-             const sp = dots.querySelectorAll('span');
-             sp.forEach(s => s.classList.remove('active'));
+         // Check for gap after this line
+         const next = lines[i+1];
+         if (next) {
+             const nextT = parseInt(next.dataset.t || '0', 10);
+             if (t >= le && t < nextT) {
+                 // We are in a gap
+                 if (nextT - le > 3000) { // Increased threshold to 3s to avoid rapid flashes
+                     gapNextLine = next;
+                 }
+                 break;
+             }
          }
       }
 
-      if (gapLine && !active) {
-         const idx = lines.indexOf(gapLine);
-         const next = lines[idx+1];
-         if (next) {
-             const endT = parseInt(gapLine.dataset.t) + parseInt(gapLine.dataset.d);
-             const startT = parseInt(next.dataset.t);
-             const gap = startT - endT;
-             
-             if (gap > 2000) {
-                 const dots = gapLine.querySelector('.waiting-dots');
-                 // Check if next line is translation
-                 const nextRow = next.querySelector('.row.trans');
-                 if (nextRow && dots && dots.parentNode !== nextRow) {
-                     nextRow.appendChild(dots); // Move dots to translation row
-                     // Ensure translation row has flex layout or inline-block to show dots at end?
-                     // .row.trans is block by default. We want dots at end.
-                     // dots is inline-block.
-                 } else if (!nextRow && dots && dots.parentNode !== gapLine) {
-                     // Move back if not trans (unlikely case but for safety)
-                     gapLine.appendChild(dots);
-                 }
-
-                 if (dots) {
-                     dots.classList.add('show');
-                     const elapsed = t - endT;
-                     const phase = gap / 3;
-                     const sp = dots.querySelectorAll('span');
-                     // Reverse logic: 3 dots -> 2 -> 1
-                     // Elapsed 0 -> phase: show 3
-                     // Elapsed phase -> phase*2: show 2
-                     // Elapsed phase*2 -> end: show 1
-                     
-                     if (sp[0]) {
-                        if (elapsed < gap - 200) sp[0].classList.add('active'); 
-                        else sp[0].classList.remove('active');
-                     }
-                     if (sp[1]) {
-                        if (elapsed < (gap*0.66)) sp[1].classList.add('active'); 
-                        else sp[1].classList.remove('active');
-                     }
-                     if (sp[2]) {
-                        if (elapsed < (gap*0.33)) sp[2].classList.add('active'); 
-                        else sp[2].classList.remove('active');
-                     }
-                 }
-                 active = gapLine;
-             }
-         }
+      // Handle Dots
+      const dLine = getDotsLine();
+      if (gapNextLine && !active) {
+          // Insert dots before gapNextLine
+          if (dLine.nextElementSibling !== gapNextLine) {
+              dLine.remove();
+              el.insertBefore(dLine, gapNextLine);
+              
+              const now = Date.now();
+              if (now - userScrollTs > AUTO_SCROLL_PAUSE_MS) {
+                 const rect = dLine.getBoundingClientRect();
+                 const viewMid = window.innerHeight * 0.42;
+                 const dy = rect.top + (rect.height / 2) - viewMid;
+                 try { el.scrollTo({ top: el.scrollTop + dy, behavior: 'smooth' }); } catch (e) { el.scrollTop += dy; }
+              }
+          }
+          
+          dLine.classList.add('show');
+          
+          // Animate dots based on remaining gap time
+          const nextT = parseInt(gapNextLine.dataset.t || '0', 10);
+          
+          // Need previous line end time.
+          const prev = gapNextLine.previousElementSibling;
+          let prevEnd = 0;
+          if (prev && prev !== dLine) {
+               prevEnd = parseInt(prev.dataset.t||'0', 10) + parseInt(prev.dataset.d||'0', 10);
+          } else {
+               // Fallback: use current time as start if we just jumped in
+               prevEnd = t; 
+               // Better: try to find index
+               const idx = lines.indexOf(gapNextLine);
+               if (idx > 0) {
+                   const p = lines[idx-1];
+                   prevEnd = parseInt(p.dataset.t||'0', 10) + parseInt(p.dataset.d||'0', 10);
+               }
+          }
+          
+          const fullGap = nextT - prevEnd;
+          const elapsed = t - prevEnd;
+          
+          const sp = dLine.querySelectorAll('span');
+          if (sp[0]) {
+             if (elapsed < fullGap - 200) sp[0].classList.add('active'); 
+             else sp[0].classList.remove('active');
+          }
+          if (sp[1]) {
+             if (elapsed < (fullGap * 0.6)) sp[1].classList.add('active'); 
+             else sp[1].classList.remove('active');
+          }
+          if (sp[2]) {
+             if (elapsed < (fullGap * 0.3)) sp[2].classList.add('active'); 
+             else sp[2].classList.remove('active');
+          }
+          
+          active = dLine; 
+      } else {
+          dLine.classList.remove('show');
+          dLine.remove();
       }
 
       lines.forEach((c) => {
@@ -1126,6 +1284,7 @@ function mountYrc2_pair(yrc) {
     window.addEventListener('touchend', () => { isDragging = false; });
   }
   audio.addEventListener('ended', async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'nextTrack', ['ended']); } catch (e) { } });
+  let lastPlaylistInteraction = 0;
   async function loadPlaylist() {
     try {
       const r = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []);
@@ -1135,11 +1294,16 @@ function mountYrc2_pair(yrc) {
       const empty = document.getElementById('emptyOverlay');
       if (!data || !listEl || !Array.isArray(data.items)) return;
       
+      // Auto-Scroll Logic: Check if we should scroll
+      const now = Date.now();
+      const shouldScroll = (now - lastPlaylistInteraction > 10000);
+      
       // Inject Styles if not exists
       if (!document.getElementById('playlist-style-v2')) {
         const s = document.createElement('style');
         s.id = 'playlist-style-v2';
         s.textContent = `
+          #playlist { overscroll-behavior: contain; }
           #playlist .item { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer; transition: background 0.2s; border-radius: 6px; margin-bottom: 4px; border-left: 3px solid transparent; }
           #playlist .item:hover { background: rgba(255,255,255,0.1); }
           #playlist .item.active { background: rgba(255,255,255,0.15); border-left-color: #fff; }
@@ -1155,6 +1319,33 @@ function mountYrc2_pair(yrc) {
           #playlist .menu button i { font-size: 13px; }
         `;
         document.head.appendChild(s);
+        
+        // Init listeners
+        listEl.addEventListener('scroll', () => { lastPlaylistInteraction = Date.now(); });
+        listEl.addEventListener('click', () => { lastPlaylistInteraction = Date.now(); });
+        listEl.addEventListener('mousemove', () => { lastPlaylistInteraction = Date.now(); });
+        
+        // Periodic check for auto-scroll
+        setInterval(() => {
+            if (Date.now() - lastPlaylistInteraction > 10000) {
+                scrollToActive();
+            }
+        }, 2000);
+      }
+      
+      function scrollToActive() {
+          const activeEl = listEl.querySelector('.item.active');
+          if (activeEl) {
+               try {
+                   const itemRect = activeEl.getBoundingClientRect();
+                   const listRect = listEl.getBoundingClientRect();
+                   const offset = itemRect.top - listRect.top + listEl.scrollTop;
+                   const target = Math.max(0, offset - listEl.clientHeight * 0.15); // Scroll to top 15%
+                   listEl.scrollTo({ top: target, behavior: 'smooth' });
+               } catch(e) {
+                   try { activeEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(e){}
+               }
+          }
       }
 
       listEl.innerHTML = '';
@@ -1245,6 +1436,11 @@ function mountYrc2_pair(yrc) {
         container.appendChild(menu);
         listEl.appendChild(container);
       });
+      
+      // Initial Scroll if needed
+      if (shouldScroll) {
+           setTimeout(scrollToActive, 100);
+      }
 
       try { const tt = document.getElementById('playlistTotalText'); if (tt) tt.textContent = `总时长：${fmt(data.totalSecs || 0)}`; } catch (e) { } try { const finEl = document.getElementById('playlistFinish'); if (finEl) { const startIdx = Math.max(0, data.currentIndex || 0); const remainList = Array.isArray(data.items) ? data.items.slice(startIdx) : []; const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const dt = new Date(Date.now() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } } catch (e) { } if (empty) empty.style.display = (data.items.length === 0) ? 'flex' : 'none'; if (!musicUrl && data.items.length > 0) { const last = data.items[data.items.length - 1]; try { if (last) { document.getElementById('audioCover').src = last.cover || ''; document.getElementById('audioTitle').textContent = last.title || ''; document.getElementById('audioArtist').textContent = last.artist || ''; } } catch (e) { } }
     } catch (e) { }

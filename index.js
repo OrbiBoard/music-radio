@@ -75,15 +75,9 @@ const loadData = () => {
     if (fs.existsSync(plFile)) {
         try {
             const data = JSON.parse(fs.readFileSync(plFile, 'utf8'));
-            if (data.date === state.today) {
-                state.playlist = data.items || [];
-                state.currentIndex = data.currentIndex || -1;
-            } else {
-                // New day, clear active playlist
-                state.playlist = [];
-                state.currentIndex = -1;
-                // Maybe preserve settings?
-            }
+            // User requested non-clearing cache. We ignore date check.
+            state.playlist = data.items || [];
+            state.currentIndex = data.currentIndex || -1;
         } catch(e){}
     }
   } catch (e) { console.error('Load Data Error', e); }
@@ -124,11 +118,15 @@ const addToHistory = (item) => {
             if (fs.existsSync(histFile)) {
                  state.dailyHistory = JSON.parse(fs.readFileSync(histFile, 'utf8'));
             }
-        } catch(e){}
+        } catch(e){ console.error('History load error', e); state.dailyHistory = []; }
     }
 
+    // Ensure item has valid ID
+    if (!item.id) return;
+    const itemToSave = { ...item, id: String(item.id), addedAt: Date.now() };
+
     // We append to history log
-    state.dailyHistory.push({ ...item, addedAt: Date.now() });
+    state.dailyHistory.push(itemToSave);
     saveData('history');
 };
 

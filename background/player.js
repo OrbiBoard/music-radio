@@ -472,6 +472,8 @@ window.addEventListener('DOMContentLoaded', () => {
   const bgMode = (localStorage.getItem('radio.bgmode') || 'blur');
   if (albumUrl) { if (bgMode === 'shine') applyFluentShine(albumUrl); else applyBlurBackground(albumUrl); }
   // --- Color Extraction & Theme Logic ---
+  let lastFlowingParams = '';
+
   function extractColor(img) {
     try {
         const canvas = document.createElement('canvas');
@@ -483,6 +485,11 @@ window.addEventListener('DOMContentLoaded', () => {
         const colorCounts = {};
         for (let i=0; i<data.length; i+=4) {
             const r = data[i]; const g = data[i+1]; const b = data[i+2];
+            
+            // Filter out very dark or very bright colors to avoid black/white theme
+            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+            if (brightness < 30 || brightness > 225) continue;
+
             const qr = Math.floor(r/32)*32;
             const qg = Math.floor(g/32)*32;
             const qb = Math.floor(b/32)*32;
@@ -526,6 +533,11 @@ window.addEventListener('DOMContentLoaded', () => {
              searchIdx++;
         }
         
+        // If we have no colors (image was all black/white), add a default blue
+        if (finalColors.length === 0) {
+            finalColors.push({r:100, g:180, b:255});
+        }
+
         while (finalColors.length < 7) {
              const base = finalColors.length > 0 ? finalColors[0] : {r:128,g:128,b:128};
              finalColors.push({
@@ -538,7 +550,10 @@ window.addEventListener('DOMContentLoaded', () => {
         const res = {};
         finalColors.forEach((c, i) => {
              let { r, g, b } = c;
+             // Ensure theme color is not too dark
              const max = Math.max(r, g, b); const min = Math.min(r, g, b);
+             if (max < 60) { r+=40; g+=40; b+=40; } // Boost dark colors
+             
              if (max - min < 20) { r=Math.min(255,r+20); g=Math.min(255,g+20); b=Math.min(255,b+30); }
              
              const idx = i === 0 ? '' : (i + 1);
@@ -594,10 +609,14 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   function applyGradientBackground(c) {
-      if (bgRule) bgRule.textContent = `body::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg, rgba(${c.r},${c.g},${c.b},0.4) 0%, rgba(0,0,0,0.9) 100%);z-index:-1;}`;
+      if (bgRule) bgRule.textContent = `body::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg, rgba(${c.r},${c.g},${c.b},0.6) 0%, rgba(0,0,0,0.95) 100%), #111;z-index:-1;}`;
   }
   
   function applyFlowingBackground(c) {
+      const params = JSON.stringify(c);
+      if (params === lastFlowingParams) return;
+      lastFlowingParams = params;
+
       if (bgRule) bgRule.textContent = '';
       let style = document.getElementById('EX_bg_flowing_style');
       if (!style) { style = document.createElement('style'); style.id = 'EX_bg_flowing_style'; document.head.appendChild(style); }

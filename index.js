@@ -19,8 +19,8 @@ const state = {
   },
   currentFloatingUrl: null,
   playlist: [],
-  dailyHistory: [], // Items for the current day
-  playCounts: {}, // { songId: count }
+  dailyHistory: [],
+  playCounts: {},
   today: '',
   dataPath: path.join(__dirname, 'data'),
   currentIndex: -1,
@@ -28,36 +28,36 @@ const state = {
   settings: { removeAfterPlay: true, playMode: 'sequence', endTime: '', pauseAtEndTime: false, download: { dir: '', format: '{t} - {a}', lrc: true } },
   downloads: [],
   sources: new Map(),
-  timerTriggered: false
+  timerTriggered: false,
+  abortController: null
 };
 
 const loadData = () => {
   try {
-    // Settings
     const savedSettings = pluginApi.store.get('settings');
     if (savedSettings) {
       state.settings = { ...state.settings, ...savedSettings };
       if (savedSettings.download) state.settings.download = { ...state.settings.download, ...savedSettings.download };
     }
 
-    // Play Counts
     state.playCounts = pluginApi.store.get('playCounts') || {};
     
-    // Check Date
     const now = new Date();
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
     state.today = `${y}-${m}-${d}`;
     
-    // Daily History
-    state.dailyHistory = pluginApi.store.get(`history_${state.today}`) || [];
+    const todayData = pluginApi.store.get(`data_${state.today}`) || { playlist: [], history: [] };
+    state.playlist = Array.isArray(todayData.playlist) ? todayData.playlist : [];
+    state.dailyHistory = Array.isArray(todayData.history) ? todayData.history : [];
     
-    // Active Playlist
-    // Note: We don't check date for active playlist, we just restore it
-    state.playlist = pluginApi.store.get('playlist') || [];
-    state.currentIndex = pluginApi.store.get('currentIndex');
-    if (typeof state.currentIndex !== 'number') state.currentIndex = -1;
+    const savedIndex = pluginApi.store.get('currentIndex');
+    if (typeof savedIndex === 'number' && savedIndex >= 0 && savedIndex < state.playlist.length) {
+      state.currentIndex = savedIndex;
+    } else {
+      state.currentIndex = -1;
+    }
 
   } catch (e) { console.error('Load Data Error', e); }
 };
@@ -67,9 +67,13 @@ const saveData = (type) => {
     if (type === 'counts') {
       pluginApi.store.set('playCounts', state.playCounts);
     } else if (type === 'history') {
-      pluginApi.store.set(`history_${state.today}`, state.dailyHistory);
+      const todayData = pluginApi.store.get(`data_${state.today}`) || { playlist: [], history: [] };
+      todayData.history = state.dailyHistory;
+      pluginApi.store.set(`data_${state.today}`, todayData);
     } else if (type === 'playlist') {
-      pluginApi.store.set('playlist', state.playlist);
+      const todayData = pluginApi.store.get(`data_${state.today}`) || { playlist: [], history: [] };
+      todayData.playlist = state.playlist;
+      pluginApi.store.set(`data_${state.today}`, todayData);
       pluginApi.store.set('currentIndex', state.currentIndex);
     } else if (type === 'settings') {
       pluginApi.store.set('settings', state.settings);
@@ -77,27 +81,55 @@ const saveData = (type) => {
   } catch (e) {}
 };
 
+const checkDateChange = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const today = `${y}-${m}-${d}`;
+  
+  if (today !== state.today) {
+    state.today = today;
+    const todayData = pluginApi.store.get(`data_${state.today}`) || { playlist: [], history: [] };
+    state.playlist = todayData.playlist || [];
+    state.dailyHistory = todayData.history || [];
+    state.currentIndex = -1;
+    return true;
+  }
+  return false;
+};
+
+const getVisiblePlaylist = () => {
+  return state.playlist.filter(item => !item.hidden);
+};
+
+const findNextVisibleIndex = (fromIdx) => {
+  for (let i = fromIdx + 1; i < state.playlist.length; i++) {
+    if (!state.playlist[i].hidden) return i;
+  }
+  for (let i = 0; i < fromIdx; i++) {
+    if (!state.playlist[i].hidden) return i;
+  }
+  return -1;
+};
+
+const getVisibleIndex = (realIdx) => {
+  if (realIdx < 0) return -1;
+  let visibleCount = 0;
+  for (let i = 0; i < realIdx; i++) {
+    if (!state.playlist[i].hidden) visibleCount++;
+  }
+  return visibleCount;
+};
+
 const addToHistory = (item) => {
-    // Add to daily history if valid
     if (!item || !item.id) return;
     
-    // Check date change
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    const today = `${y}-${m}-${d}`;
-    
-    if (today !== state.today) {
-        state.today = today;
-        state.dailyHistory = pluginApi.store.get(`history_${state.today}`) || [];
-    }
+    checkDateChange();
 
-    // Ensure item has valid ID
     if (!item.id) return;
     const itemToSave = { ...item, id: String(item.id), addedAt: Date.now() };
 
-    // We append to history log
     state.dailyHistory.push(itemToSave);
     saveData('history');
 };
@@ -170,15 +202,13 @@ const functions = {
   
   getHistory: async (dateStr) => {
       try {
-          // If asking for today, return memory state
           if (!dateStr || dateStr === state.today) {
-              // Return reverse order (newest first)
+              checkDateChange();
               return { ok: true, items: state.dailyHistory.slice().reverse() };
           }
-          // Load from store
-          const items = pluginApi.store.get(`history_${dateStr}`);
-          if (items && Array.isArray(items)) {
-              return { ok: true, items: items.reverse() };
+          const data = pluginApi.store.get(`data_${dateStr}`);
+          if (data && Array.isArray(data.history)) {
+              return { ok: true, items: data.history.slice().reverse() };
           }
           return { ok: true, items: [] };
       } catch (e) { return { ok: false, error: e.message }; }
@@ -190,7 +220,9 @@ const functions = {
               state.dailyHistory = [];
               saveData('history');
           } else {
-              pluginApi.store.set(`history_${dateStr}`, []);
+              const data = pluginApi.store.get(`data_${dateStr}`) || { playlist: [], history: [] };
+              data.history = [];
+              pluginApi.store.set(`data_${dateStr}`, data);
           }
           return { ok: true };
       } catch (e) { return { ok: false, error: e.message }; }
@@ -208,12 +240,12 @@ const functions = {
                   saveData('history');
               }
           } else {
-              let items = pluginApi.store.get(`history_${dateStr}`);
-              if (items && Array.isArray(items)) {
-                  const idx = items.findIndex(x => x.addedAt === ts);
+              let data = pluginApi.store.get(`data_${dateStr}`);
+              if (data && Array.isArray(data.history)) {
+                  const idx = data.history.findIndex(x => x.addedAt === ts);
                   if (idx >= 0) {
-                      items.splice(idx, 1);
-                      pluginApi.store.set(`history_${dateStr}`, items);
+                      data.history.splice(idx, 1);
+                      pluginApi.store.set(`data_${dateStr}`, data);
                   }
               }
           }
@@ -223,6 +255,10 @@ const functions = {
 
   cancelLoading: async () => {
       try {
+        if (state.abortController) {
+          state.abortController.abort();
+          state.abortController = null;
+        }
         pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' });
         return { ok: true };
       } catch(e) { return { ok: false }; }
@@ -382,10 +418,29 @@ const functions = {
   },
   getBiliPlayUrl: async (bvid = '', cid = '') => {
     try {
+      state.abortController = new AbortController();
+      const signal = state.abortController.signal;
       const https = require('https');
       const fs = require('fs');
       const os = require('os');
-      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
+      
+      async function fetchJson(u){ 
+        return await new Promise((resolve, reject) => { 
+          const req = https.get(u, { 
+            headers: { 'User-Agent': 'OrbiBoard/Radio', 'Accept': 'application/json' },
+            signal
+          }, (res) => { 
+            const chunks=[]; 
+            res.on('data',(c)=>chunks.push(c)); 
+            res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); 
+          }); 
+          req.on('error', (e) => {
+            if (e.name === 'AbortError') reject(new Error('cancelled'));
+            else reject(e);
+          });
+        }); 
+      }
+      
       let c = String(cid || '');
       if (!c || c === 'default') {
         const v = await fetchJson(`https://api.bilibili.com/x/player/pagelist?bvid=${encodeURIComponent(String(bvid||''))}`);
@@ -402,8 +457,34 @@ const functions = {
       const cachePath = require('path').join(tempDir, fileName);
       if (fs.existsSync(cachePath)) return { ok: true, url: require('url').pathToFileURL(cachePath).href };
       try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show' }); } catch (e) {}
-      async function headSize(u){ return await new Promise((resolve, reject) => { https.get(u, { method: 'HEAD', headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36', 'Accept-Encoding': 'gzip', 'Origin': 'https://www.bilibili.com', 'Referer': `https://www.bilibili.com/${String(bvid)}` } }, (res) => { const len = parseInt(res.headers['content-length']||'0', 10) || 0; resolve(len); }).on('error', reject); }); }
-      async function fetchRange(u, start, end){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36', 'Accept-Encoding': 'gzip', 'Origin': 'https://www.bilibili.com', 'Referer': `https://www.bilibili.com/${String(bvid)}`, 'Range': `bytes=${start}-${end}` } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>resolve(Buffer.concat(chunks))); }).on('error', reject); }); }
+      
+      async function headSize(u){ 
+        return await new Promise((resolve, reject) => { 
+          const req = https.get(u, { 
+            method: 'HEAD', 
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36', 'Accept-Encoding': 'gzip', 'Origin': 'https://www.bilibili.com', 'Referer': `https://www.bilibili.com/${String(bvid)}` },
+            signal
+          }, (res) => { const len = parseInt(res.headers['content-length']||'0', 10) || 0; resolve(len); }); 
+          req.on('error', (e) => {
+            if (e.name === 'AbortError') reject(new Error('cancelled'));
+            else reject(e);
+          });
+        }); 
+      }
+      
+      async function fetchRange(u, start, end){ 
+        return await new Promise((resolve, reject) => { 
+          const req = https.get(u, { 
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36', 'Accept-Encoding': 'gzip', 'Origin': 'https://www.bilibili.com', 'Referer': `https://www.bilibili.com/${String(bvid)}`, 'Range': `bytes=${start}-${end}` },
+            signal
+          }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>resolve(Buffer.concat(chunks))); }); 
+          req.on('error', (e) => {
+            if (e.name === 'AbortError') reject(new Error('cancelled'));
+            else reject(e);
+          });
+        }); 
+      }
+      
       const size = await headSize(url0);
       if (!size) return { ok: false, error: 'invalid content size' };
       const parts = 10;
@@ -425,24 +506,39 @@ const functions = {
       return { ok: true, url: require('url').pathToFileURL(cachePath).href };
     } catch (e) {
       try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+      if (e.message === 'cancelled') return { ok: false, error: 'cancelled', cancelled: true };
       return { ok: false, error: e?.message || String(e) };
+    } finally {
+      state.abortController = null;
     }
   },
   getKuwoPlayUrl: async (id, quality = 'standard') => {
     try {
+      state.abortController = new AbortController();
       const https = require('https');
       const q = String(quality || 'standard');
       const api = `https://api.limeasy.cn/kwmpro/v1/?id=${encodeURIComponent(String(id||''))}&quality=${encodeURIComponent(q)}`;
       const data = await new Promise((resolve, reject) => {
-        https.get(api, { headers: { 'User-Agent': 'OrbiBoard/Radio' } }, (res) => {
+        const req = https.get(api, { 
+          headers: { 'User-Agent': 'OrbiBoard/Radio' },
+          signal: state.abortController.signal
+        }, (res) => {
           const chunks = []; res.on('data', (c) => chunks.push(c));
           res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { reject(e); } });
-        }).on('error', reject);
+        });
+        req.on('error', (e) => {
+          if (e.name === 'AbortError') reject(new Error('cancelled'));
+          else reject(e);
+        });
+        req.setTimeout(15000, () => { req.destroy(new Error('timeout')); });
       });
       if (data && (data.code === 200 || data.code === 201) && data.url) return { ok: true, url: data.url };
       return { ok: false, error: 'resolve failed' };
     } catch (e) {
+      if (e.message === 'cancelled') return { ok: false, error: 'cancelled', cancelled: true };
       return { ok: false, error: e?.message || String(e) };
+    } finally {
+      state.abortController = null;
     }
   },
   fetchKuwoLyrics: async (item) => {
@@ -749,9 +845,16 @@ const functions = {
       try {
         if (state.currentIndex >= 0 && state.currentIndex < state.playlist.length) {
           const cur = state.playlist[state.currentIndex];
-          const g = await functions.getPlayUrl(cur, 'standard');
-          if (g && g.ok && g.url) {
-            await functions.setBackgroundMusic({ music: g.url, album: cur.cover, albumName: cur.album, title: cur.title, artist: cur.artist, id: cur.id, source: cur.source || 'kuwo' });
+          if (cur && !cur.hidden) {
+            await functions.setBackgroundMusic({ 
+              album: cur.cover, 
+              albumName: cur.album, 
+              title: cur.title, 
+              artist: cur.artist, 
+              id: cur.id, 
+              source: cur.source || 'kuwo',
+              playCount: state.playCounts[cur.id] || 0
+            });
           }
         }
       } catch (e) {}
@@ -760,21 +863,19 @@ const functions = {
       return { ok: false, error: e?.message || String(e) };
     }
   },
-  setBackgroundMusic: async ({ music, album, albumName, title, artist, id, source, cover }) => {
+  setBackgroundMusic: async ({ music, album, albumName, title, artist, id, source, cover, playCount: externalPlayCount }) => {
     try {
       const bgFile = path.join(__dirname, 'background', 'player.html');
       const u = new url.URL(url.pathToFileURL(bgFile).href);
       if (music) u.searchParams.set('music', String(music));
       
       let coverUrl = cover;
-      // Legacy compatibility: if album argument looks like a URL, treat it as cover
       if (!coverUrl && album && (String(album).startsWith('http') || String(album).startsWith('data:') || String(album).startsWith('blob:'))) {
         coverUrl = album;
       }
       if (coverUrl) u.searchParams.set('album', String(coverUrl));
 
       let aName = albumName;
-      // If album argument is not a URL, treat it as album name if albumName is missing
       if (!aName && album && !coverUrl) {
         aName = album;
       }
@@ -786,12 +887,17 @@ const functions = {
       let pCount = 0;
       if (id) {
         u.searchParams.set('id', String(id));
-        // Update Play Count
-        const sId = String(id);
-        if (!state.playCounts[sId]) state.playCounts[sId] = 0;
-        state.playCounts[sId]++;
-        pCount = state.playCounts[sId];
-        saveData('counts');
+        if (music) {
+          const sId = String(id);
+          if (!state.playCounts[sId]) state.playCounts[sId] = 0;
+          state.playCounts[sId]++;
+          pCount = state.playCounts[sId];
+          saveData('counts');
+        } else if (typeof externalPlayCount === 'number') {
+          pCount = externalPlayCount;
+        } else {
+          pCount = state.playCounts[String(id)] || 0;
+        }
       }
       u.searchParams.set('playCount', String(pCount));
 
@@ -819,20 +925,24 @@ const functions = {
       if (!it.id) {
         return { ok: false, error: 'invalid item' };
       }
-      const wasEmpty = state.playlist.length === 0 || state.currentIndex < 0;
+      const wasEmpty = getVisiblePlaylist().length === 0 || state.currentIndex < 0;
       state.playlist.push(it);
       addToHistory(it);
       saveData('playlist');
       if (wasEmpty) {
-        state.currentIndex = 0;
+        state.currentIndex = state.playlist.length - 1;
         saveData('playlist');
         try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: it.title, artist: it.artist, playCount: state.playCounts[it.id] || 0, cover: it.cover }); } catch (e) {}
         const g = await functions.getPlayUrl(it, 'standard');
         if (g && g.ok && g.url) await functions.setBackgroundMusic({ ...it, music: g.url, albumName: it.album });
+        else if (g && g.cancelled) {
+          try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+          return { ok: false, error: 'cancelled', cancelled: true };
+        }
       }
-      pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+      pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: getVisiblePlaylist().length } });
       try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
-      return { ok: true, length: state.playlist.length };
+      return { ok: true, length: getVisiblePlaylist().length };
     } catch (e) {
       try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
       return { ok: false, error: e?.message || String(e) };
@@ -854,26 +964,29 @@ const functions = {
       if (!it.id) {
         return { ok: false, error: 'invalid item' };
       }
-      const wasEmpty = state.playlist.length === 0 || state.currentIndex < 0;
+      const wasEmpty = getVisiblePlaylist().length === 0 || state.currentIndex < 0;
       if (wasEmpty) {
         state.playlist.push(it);
-        state.currentIndex = 0;
+        state.currentIndex = state.playlist.length - 1;
         addToHistory(it);
         saveData('playlist');
         try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: it.title, artist: it.artist, playCount: state.playCounts[it.id] || 0, cover: it.cover }); } catch (e) {}
         const g = await functions.getPlayUrl(it, 'standard');
         if (g && g.ok && g.url) await functions.setBackgroundMusic({ ...it, music: g.url, albumName: it.album });
-        pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+        else if (g && g.cancelled) {
+          try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+          return { ok: false, error: 'cancelled', cancelled: true };
+        }
+        pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: getVisiblePlaylist().length } });
         try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
-        return { ok: true, length: state.playlist.length, pos: 0 };
+        return { ok: true, length: getVisiblePlaylist().length, pos: 0 };
       } else {
         const pos = state.currentIndex >= 0 ? state.currentIndex + 1 : state.playlist.length;
         state.playlist.splice(pos, 0, it);
         addToHistory(it);
         saveData('playlist');
-        pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
-        // No loading screen for enqueue next if not playing
-        return { ok: true, length: state.playlist.length, pos };
+        pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: getVisiblePlaylist().length } });
+        return { ok: true, length: getVisiblePlaylist().length, pos };
       }
     } catch (e) {
       try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
@@ -902,10 +1015,11 @@ const functions = {
       state.currentIndex = state.playlist.length - 1;
       addToHistory(meta);
       saveData('playlist');
-      pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+      pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: getVisiblePlaylist().length } });
       const g = await functions.getPlayUrl(meta, 'standard');
       if (!g || !g.ok || !g.url) {
          try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+         if (g && g.cancelled) return { ok: false, error: 'cancelled', cancelled: true };
          return { ok: false, error: g?.error || 'resolve failed' };
       }
       await functions.setBackgroundMusic({ ...meta, music: g.url, albumName: meta.album });
@@ -919,35 +1033,35 @@ const functions = {
     try {
       const mode = state.settings.playMode || 'sequence';
       const prevIdx = state.currentIndex;
-      const len = state.playlist.length;
-      if (len === 0) return { ok: false, error: 'empty playlist' };
+      const visible = getVisiblePlaylist();
+      const visibleLen = visible.length;
+      if (visibleLen === 0) return { ok: false, error: 'empty playlist' };
 
       let nextIdx = -1;
       
-      // Handle Remove After Play
-      // Only active if mode is Random, Sequence, or Play Once
       const canRemove = ['random', 'sequence', 'play-once'].includes(mode);
       const shouldRemove = cause === 'ended' && state.settings.removeAfterPlay && canRemove;
       
-      if (shouldRemove && prevIdx >= 0 && prevIdx < len) {
-         state.playlist.splice(prevIdx, 1);
+      if (shouldRemove && prevIdx >= 0 && prevIdx < state.playlist.length) {
+         state.playlist[prevIdx].hidden = true;
          saveData('playlist');
-         pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+         pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: getVisiblePlaylist().length } });
          
-         if (state.playlist.length === 0) {
+         const newVisible = getVisiblePlaylist();
+         if (newVisible.length === 0) {
              state.currentIndex = -1;
              return { ok: false, error: 'playlist ended' };
          }
 
          if (mode === 'random') {
-             nextIdx = Math.floor(Math.random() * state.playlist.length);
+             const randomItem = newVisible[Math.floor(Math.random() * newVisible.length)];
+             nextIdx = state.playlist.findIndex(it => !it.hidden && it.id === randomItem.id && it === randomItem);
          } else if (mode === 'play-once') {
              state.currentIndex = -1; 
              return { ok: false, error: 'play once ended' };
          } else {
-             // sequence
-             nextIdx = prevIdx; 
-             if (nextIdx >= state.playlist.length) return { ok: false, error: 'playlist ended' }; 
+             nextIdx = findNextVisibleIndex(prevIdx);
+             if (nextIdx < 0) return { ok: false, error: 'playlist ended' }; 
          }
       } else {
          if (cause === 'ended') {
@@ -956,28 +1070,34 @@ const functions = {
              } else if (mode === 'play-once') {
                  return { ok: false, error: 'play once ended' };
              } else if (mode === 'random') {
-                 nextIdx = Math.floor(Math.random() * len);
+                 const randomItem = visible[Math.floor(Math.random() * visibleLen)];
+                 nextIdx = state.playlist.findIndex(it => !it.hidden && it.id === randomItem.id && it === randomItem);
              } else if (mode === 'list-loop') {
-                 nextIdx = (prevIdx + 1) % len;
-             } else { // sequence
-                 if (prevIdx >= len - 1) return { ok: false, error: 'playlist ended' };
-                 nextIdx = prevIdx + 1;
+                 nextIdx = findNextVisibleIndex(prevIdx);
+                 if (nextIdx < 0) nextIdx = findNextVisibleIndex(-1);
+             } else {
+                 nextIdx = findNextVisibleIndex(prevIdx);
+                 if (nextIdx < 0) return { ok: false, error: 'playlist ended' };
              }
          } else {
-             // Manual Next
              if (mode === 'random') {
-                 nextIdx = Math.floor(Math.random() * len);
+                 const randomItem = visible[Math.floor(Math.random() * visibleLen)];
+                 nextIdx = state.playlist.findIndex(it => !it.hidden && it.id === randomItem.id && it === randomItem);
              } else {
-                 // Sequence/PlayOnce manual -> next or stop
-                 if (mode === 'sequence' || mode === 'play-once') {
-                     if (prevIdx >= len - 1) return { ok: false, error: 'no next track' };
-                     nextIdx = prevIdx + 1;
-                 } else {
-                     // List Loop, Single Loop (Manual) -> Wrap
-                     nextIdx = (prevIdx + 1) % len;
+                 nextIdx = findNextVisibleIndex(prevIdx);
+                 if (nextIdx < 0) {
+                     if (mode === 'list-loop' || mode === 'single-loop') {
+                         nextIdx = findNextVisibleIndex(-1);
+                     } else {
+                         return { ok: false, error: 'no next track' };
+                     }
                  }
              }
          }
+      }
+
+      if (nextIdx < 0 || nextIdx >= state.playlist.length || state.playlist[nextIdx].hidden) {
+          return { ok: false, error: 'no valid next track' };
       }
 
       state.currentIndex = nextIdx;
@@ -988,6 +1108,7 @@ const functions = {
       const g = await functions.getPlayUrl(meta, 'standard');
       if (!g || !g.ok || !g.url) {
         try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        if (g && g.cancelled) return { ok: false, error: 'cancelled', cancelled: true };
         return { ok: false, error: g?.error || 'resolve failed' };
       }
       await functions.setBackgroundMusic({ ...meta, music: g.url, albumName: meta.album });
@@ -999,8 +1120,16 @@ const functions = {
   },
   prevTrack: async () => {
     try {
-      const prevIdx = state.currentIndex > 0 ? state.currentIndex - 1 : -1;
-      if (prevIdx < 0 || prevIdx >= state.playlist.length) return { ok: false, error: 'no previous track' };
+      let prevIdx = -1;
+      for (let i = state.currentIndex - 1; i >= 0; i--) {
+        if (!state.playlist[i].hidden) { prevIdx = i; break; }
+      }
+      if (prevIdx < 0) {
+          for (let i = state.playlist.length - 1; i > state.currentIndex; i--) {
+            if (!state.playlist[i].hidden) { prevIdx = i; break; }
+          }
+      }
+      if (prevIdx < 0) return { ok: false, error: 'no previous track' };
       state.currentIndex = prevIdx;
       const meta = state.playlist[prevIdx];
       
@@ -1009,6 +1138,32 @@ const functions = {
       const g = await functions.getPlayUrl(meta, 'standard');
       if (!g || !g.ok || !g.url) {
         try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        if (g && g.cancelled) return { ok: false, error: 'cancelled', cancelled: true };
+        return { ok: false, error: g?.error || 'resolve failed' };
+      }
+      await functions.setBackgroundMusic({ ...meta, music: g.url, albumName: meta.album });
+      return { ok: true };
+    } catch (e) {
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+      return { ok: false, error: e?.message || String(e) };
+    }
+  },
+  playCurrent: async () => {
+    try {
+      if (state.currentIndex < 0 || state.currentIndex >= state.playlist.length) {
+        return { ok: false, error: 'no current track' };
+      }
+      const meta = state.playlist[state.currentIndex];
+      if (!meta || meta.hidden) {
+        return { ok: false, error: 'current track not available' };
+      }
+      
+      try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: meta.title, artist: meta.artist, playCount: state.playCounts[meta.id] || 0, cover: meta.cover }); } catch (e) {}
+      
+      const g = await functions.getPlayUrl(meta, 'standard');
+      if (!g || !g.ok || !g.url) {
+        try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        if (g && g.cancelled) return { ok: false, error: 'cancelled', cancelled: true };
         return { ok: false, error: g?.error || 'resolve failed' };
       }
       await functions.setBackgroundMusic({ ...meta, music: g.url, albumName: meta.album });
@@ -1020,8 +1175,10 @@ const functions = {
   },
   getPlaylist: async () => {
     try {
-      const total = state.playlist.reduce((acc, it) => acc + (Number(it.duration)||0), 0);
-      return { ok: true, items: state.playlist.slice(), currentIndex: state.currentIndex, totalSecs: total };
+      const visible = getVisiblePlaylist();
+      const total = visible.reduce((acc, it) => acc + (Number(it.duration)||0), 0);
+      const visibleCurrentIdx = getVisibleIndex(state.currentIndex);
+      return { ok: true, items: visible, currentIndex: visibleCurrentIdx, totalSecs: total };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
     }
@@ -1049,22 +1206,41 @@ const functions = {
   },
   removeIndex: async (idx = 0) => {
     try {
-      const i = Math.floor(Number(idx)||0);
-      if (i < 0 || i >= state.playlist.length) return { ok: false, error: 'index out of range' };
-      state.playlist.splice(i, 1);
-      if (state.currentIndex === i) state.currentIndex = Math.min(state.currentIndex, state.playlist.length - 1);
+      const visibleIdx = Math.floor(Number(idx)||0);
+      const visible = getVisiblePlaylist();
+      if (visibleIdx < 0 || visibleIdx >= visible.length) return { ok: false, error: 'index out of range' };
+      
+      const targetItem = visible[visibleIdx];
+      const i = state.playlist.findIndex(it => !it.hidden && it === targetItem);
+      if (i < 0) return { ok: false, error: 'item not found' };
+      
+      state.playlist[i].hidden = true;
+      saveData('playlist');
+      
+      if (state.currentIndex === i) state.currentIndex = findNextVisibleIndex(i);
       else if (state.currentIndex > i) state.currentIndex -= 1;
-      pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
-      return { ok: true, length: state.playlist.length };
+      
+      pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: getVisiblePlaylist().length } });
+      return { ok: true, length: getVisiblePlaylist().length };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
     }
   },
   moveItem: async (fromIdx, toIdx) => {
     try {
-      const f = Math.floor(Number(fromIdx)||0);
-      const t = Math.floor(Number(toIdx)||0);
-      if (f < 0 || f >= state.playlist.length || t < 0 || t >= state.playlist.length || f === t) return { ok: false };
+      const visible = getVisiblePlaylist();
+      const visibleFrom = Math.floor(Number(fromIdx)||0);
+      const visibleTo = Math.floor(Number(toIdx)||0);
+      
+      if (visibleFrom < 0 || visibleFrom >= visible.length || visibleTo < 0 || visibleTo >= visible.length || visibleFrom === visibleTo) return { ok: false };
+      
+      const fromItem = visible[visibleFrom];
+      const toItem = visible[visibleTo];
+      
+      const f = state.playlist.findIndex(it => !it.hidden && it === fromItem);
+      const t = state.playlist.findIndex(it => !it.hidden && it === toItem);
+      
+      if (f < 0 || t < 0 || f === t) return { ok: false };
       
       const item = state.playlist[f];
       state.playlist.splice(f, 1);
@@ -1077,7 +1253,8 @@ const functions = {
         else if (f > state.currentIndex && t <= state.currentIndex) state.currentIndex++;
       }
       
-      pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: state.playlist.length } });
+      saveData('playlist');
+      pluginApi.emit(state.eventChannel, { type: 'update', target: 'playlist', value: { length: getVisiblePlaylist().length } });
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e?.message || String(e) };
@@ -1085,16 +1262,23 @@ const functions = {
   },
   playIndex: async (idx = 0) => {
     try {
-      const i = Math.floor(Number(idx)||0);
-      if (i < 0 || i >= state.playlist.length) return { ok: false, error: 'index out of range' };
-      state.currentIndex = i;
-      const meta = state.playlist[i];
+      const visibleIdx = Math.floor(Number(idx)||0);
+      const visible = getVisiblePlaylist();
+      if (visibleIdx < 0 || visibleIdx >= visible.length) return { ok: false, error: 'index out of range' };
+      
+      const targetItem = visible[visibleIdx];
+      const realIdx = state.playlist.findIndex(it => !it.hidden && it === targetItem);
+      if (realIdx < 0) return { ok: false, error: 'item not found' };
+      
+      state.currentIndex = realIdx;
+      const meta = state.playlist[realIdx];
       
       try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'show', title: meta.title, artist: meta.artist, playCount: state.playCounts[meta.id] || 0, cover: meta.cover }); } catch (e) {}
       
       const g = await functions.getPlayUrl(meta, 'standard');
       if (!g || !g.ok || !g.url) {
         try { pluginApi.emit(state.eventChannel, { type: 'update', target: 'songLoading', value: 'hide' }); } catch (e) {}
+        if (g && g.cancelled) return { ok: false, error: 'cancelled', cancelled: true };
         return { ok: false, error: g?.error || 'resolve failed' };
       }
       await functions.setBackgroundMusic({ music: g.url, album: meta.cover, albumName: meta.album, title: meta.title, artist: meta.artist, id: meta.id, source: meta.source });

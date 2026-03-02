@@ -238,9 +238,9 @@
         const api = getApi();
         if (!api) return;
         
-        const res = await api.pluginCall('music-radio', 'getHistory', [dateStr]);
-        if (res && res.ok && res.items) {
-            render(res.items);
+        const res = await api.pluginCall('music-radio', 'getHistory', dateStr);
+        if (res && res.ok && res.result.items) {
+            render(res.result.items);
         } else {
             render([]);
         }
@@ -251,7 +251,7 @@
         const dateStr = document.getElementById('datePicker').value;
         const api = getApi();
         if (!api) return;
-        await api.pluginCall('music-radio', 'clearHistory', [dateStr]);
+        await api.pluginCall('music-radio', 'clearHistory', dateStr);
         loadHistory();
     }
 

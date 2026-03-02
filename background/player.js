@@ -378,23 +378,24 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   } catch (e) {} }
   function setBiliMode(m){ biliMode = m; try { localStorage.setItem('radio.biliVideo.mode', biliMode); } catch (e) {} applyBiliMode(); }
+  
+    const finalCover = albumUrl || '';
+    audioBar.style.display = 'flex';
+    audioCover.src = finalCover;
+    audioTitle.textContent = title || '';
+    audioArtist.textContent = artist || '';
+    
     if (musicUrl) {
       audio.src = musicUrl;
-      audioBar.style.display = 'flex';
-      const finalCover = albumUrl || '';
-      audioCover.src = finalCover;
       applyThemeColors(finalCover);
-      audioTitle.textContent = title || '';
-      audioArtist.textContent = artist || '';
       
-      // Update Loading UI
       if (songLoading) {
         songLoading.style.display = 'flex';
         if (loadingTitle) loadingTitle.textContent = title || '正在加载...';
         if (loadingArtist) loadingArtist.textContent = artist || '';
         if (loadingCount) loadingCount.textContent = `已播放 ${playCount} 次`;
         if (loadingCover) {
-             loadingCover.style.display = 'none'; // Hide first
+             loadingCover.style.display = 'none';
              if (finalCover) {
                  loadingCover.src = finalCover;
                  loadingCover.onload = () => { loadingCover.style.display = 'block'; };
@@ -416,6 +417,10 @@ window.addEventListener('DOMContentLoaded', () => {
         if (biliFloat) biliFloat.style.display = 'none';
         if (biliToolbar) biliToolbar.style.display = 'none';
       }
+    } else {
+      if (finalCover) applyThemeColors(finalCover);
+      if (biliFloat) biliFloat.style.display = 'none';
+      if (biliToolbar) biliToolbar.style.display = 'none';
     }
   function applyBlurBackground(urlStr) {
     if (!bgRule) return;
@@ -652,30 +657,33 @@ window.addEventListener('DOMContentLoaded', () => {
   function applyBackgroundCurrent(){ 
     try { 
         const src = document.getElementById('audioCover')?.src || albumUrl || ''; 
-        const mode = localStorage.getItem('radio.bgmode') || 'blur'; 
+        const mode = localStorage.getItem('radio.bgmode') || 'blur';
         
         // Clean up
         const exShine = document.getElementById('EX_background_fluentShine'); if (exShine) exShine.style.display = 'none';
         const stFlow = document.getElementById('EX_bg_flowing_style'); if (stFlow) stFlow.textContent = '';
         if (bgRule) bgRule.textContent = '';
+        
+        // Reset flowing background cache so it can be reapplied
+        lastFlowingParams = '';
 
         if (mode === 'shine') {
              if (exShine) exShine.style.display = 'block';
              else if (src) applyFluentShine(src);
         } else if (mode === 'gradient') {
-            const r = getComputedStyle(document.documentElement).getPropertyValue('--theme-r') || 100;
-            const g = getComputedStyle(document.documentElement).getPropertyValue('--theme-g') || 100;
-            const b = getComputedStyle(document.documentElement).getPropertyValue('--theme-b') || 100;
+            const r = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--theme-r')) || 100;
+            const g = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--theme-g')) || 100;
+            const b = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--theme-b')) || 100;
             applyGradientBackground({r,g,b});
         } else if (mode === 'flowing') {
             const colors = {};
-            colors.r = getComputedStyle(document.documentElement).getPropertyValue('--theme-r') || 100;
-            colors.g = getComputedStyle(document.documentElement).getPropertyValue('--theme-g') || 100;
-            colors.b = getComputedStyle(document.documentElement).getPropertyValue('--theme-b') || 100;
+            colors.r = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--theme-r')) || 100;
+            colors.g = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--theme-g')) || 100;
+            colors.b = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--theme-b')) || 100;
             for(let i=2; i<=7; i++) {
-                colors[`r${i}`] = getComputedStyle(document.documentElement).getPropertyValue(`--theme-r${i}`) || 80;
-                colors[`g${i}`] = getComputedStyle(document.documentElement).getPropertyValue(`--theme-g${i}`) || 80;
-                colors[`b${i}`] = getComputedStyle(document.documentElement).getPropertyValue(`--theme-b${i}`) || 80;
+                colors[`r${i}`] = parseInt(getComputedStyle(document.documentElement).getPropertyValue(`--theme-r${i}`)) || colors.r;
+                colors[`g${i}`] = parseInt(getComputedStyle(document.documentElement).getPropertyValue(`--theme-g${i}`)) || colors.g;
+                colors[`b${i}`] = parseInt(getComputedStyle(document.documentElement).getPropertyValue(`--theme-b${i}`)) || colors.b;
             }
             applyFlowingBackground(colors);
         } else {
@@ -1514,7 +1522,25 @@ function mountYrc2_pair(yrc) {
 
   if (prevBtn) prevBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'prevTrack', []); } catch (e) { } };
   if (nextBtn) nextBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'nextTrack', ['manual']); } catch (e) { } };
-  if (playBtn) { playBtn.onclick = () => { try { if (audio.paused) { audio.play(); playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; } else { audio.pause(); playBtn.innerHTML = '<i class="ri-play-fill"></i>'; } } catch (e) { } }; audio.addEventListener('play', () => { playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; }); audio.addEventListener('pause', () => { playBtn.innerHTML = '<i class="ri-play-fill"></i>'; }); }
+  if (playBtn) { 
+    playBtn.onclick = async () => { 
+      try { 
+        if (!audio.src || audio.src === '' || audio.src === location.href) {
+          try { await window.lowbarAPI.pluginCall('music-radio', 'playCurrent', []); } catch (e) { }
+          return;
+        }
+        if (audio.paused) { 
+          audio.play(); 
+          playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; 
+        } else { 
+          audio.pause(); 
+          playBtn.innerHTML = '<i class="ri-play-fill"></i>'; 
+        } 
+      } catch (e) { } 
+    }; 
+    audio.addEventListener('play', () => { playBtn.innerHTML = '<i class="ri-pause-fill"></i>'; }); 
+    audio.addEventListener('pause', () => { playBtn.innerHTML = '<i class="ri-play-fill"></i>'; }); 
+  }
   
   if (downloadBtn) downloadBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'downloadCurrent', []); } catch (e) { } };
 

@@ -103,7 +103,13 @@
             <input id="removeAfterPlay" type="checkbox" style="accent-color:#6ab4ff;" />
             <label for="removeAfterPlay" style="cursor:pointer;">播完删除</label>
           </div>
-          <div class="total" id="playlistTotal"><span id="playlistTotalText">总时长：--:--</span> <span id="playlistFinish" style="color:#cfcfcf; font-size:12px;">预计播完：--:--</span></div>
+          <div class="total" id="playlistTotal">
+            <span>
+            <span id="playlistCountText" style="font-size:16px; font-weight:600; color:#e6e6e6;margin-right:4px;">0</span>
+            <span style="font-size:12px; color:#aaa;">/</span>
+            <span id="playlistTotalCount" style="margin-left:4px;font-size:12px; color:#aaa;">0</span>
+            </span>
+            <span style="margin-left:8px; font-size:12px; color:#888;" id="playlistTotalText">总时长 --:--</span></div>
           <div id="playlistAddBtn" style="margin-top:12px; display:flex; align-items:center; gap:8px; color:#e6e6e6; cursor:pointer; padding:8px; border:1px dashed rgba(255,255,255,0.1); border-radius:8px;">
             <i class="ri-add-line"></i> 添加音乐
           </div>
@@ -137,6 +143,7 @@
           <span class="audio-progress-time" id="progressDuration">0:00</span>
         </div>
         <div class="audio-bar-inner">
+          <button class="audio-finish-btn" id="audioFinishBtn" title="预计播完时间"><i class="ri-timer-line"></i> <span id="audioFinishText">--:--播完</span></button>
           <div class="audio-time" id="audioTime">0:00/0:00</div>
           <div class="audio-controls" style="margin: 0 auto; display:flex; gap:12px; align-items:center;">
             <button class="audio-btn sm" id="audioDownloadBtn" title="下载"><i class="ri-download-cloud-2-line"></i></button>
@@ -145,6 +152,7 @@
             <button class="audio-btn" id="audioNextBtn" title="下一首"><i class="ri-skip-forward-fill"></i></button>
             <button class="audio-btn sm" id="audioModeBtn" title="播放模式"><i class="ri-order-play-line"></i></button>
           </div>
+          <button class="audio-finish-btn" id="audioSourceBtn" title="音源"><i class="ri-broadcast-line"></i> <span id="audioSourceText">音源: --</span></button>
         </div>
         <div class="audio-spectrum"><canvas id="audioSpectrum"></canvas></div>
       </div>

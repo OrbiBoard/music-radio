@@ -63,6 +63,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!localStorage.getItem('radio.shine.audioReactive')) localStorage.setItem('radio.shine.audioReactive','1');
     if (!localStorage.getItem('radio.lyric.pair.ms')) localStorage.setItem('radio.lyric.pair.ms','600');
     if (!localStorage.getItem('radio.lyric.back.ms')) localStorage.setItem('radio.lyric.back.ms','300');
+    if (!localStorage.getItem('radio.lyric.offset.ms')) localStorage.setItem('radio.lyric.offset.ms','100');
   } catch (e) {}
   let audioCtx = null;
   let analyser = null;
@@ -344,14 +345,14 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     requestAnimationFrame(loop);
   }
-  let biliMode = localStorage.getItem('radio.biliVideo.mode') || 'float';
-  function applyBiliMode(){ try {
+  let VMusicMode = localStorage.getItem('radio.vMusic.mode') || 'float';
+  function applyVMusicMode(){ try {
     if (!biliFloat || !biliToolbar) return;
     if (musicSource !== 'bili') { biliFloat.style.display = 'none'; biliToolbar.style.display = 'none'; return; }
     const nowLeft = document.querySelector('.now-left');
     const lyr = document.getElementById('lyrics');
     biliToolbar.style.display = 'flex';
-    if (biliMode === 'hidden') {
+    if (VMusicMode === 'hidden') {
       biliFloat.style.display = 'none';
       biliFloat.classList.remove('expand');
       biliToolbar.classList.remove('overlay');
@@ -359,7 +360,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (lyr) lyr.style.display = '';
       if (biliCollapseBtn) biliCollapseBtn.innerHTML = '<i class="ri-add-line"></i> 展开';
       if (biliExpandBtn) biliExpandBtn.innerHTML = '<i class="ri-expand-diagonal-line"></i> 放大';
-    } else if (biliMode === 'expand') {
+    } else if (VMusicMode === 'expand') {
       biliFloat.style.display = 'block';
       biliFloat.classList.add('expand');
       biliToolbar.classList.add('overlay');
@@ -377,7 +378,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (biliExpandBtn) biliExpandBtn.innerHTML = '<i class="ri-expand-diagonal-line"></i> 放大';
     }
   } catch (e) {} }
-  function setBiliMode(m){ biliMode = m; try { localStorage.setItem('radio.biliVideo.mode', biliMode); } catch (e) {} applyBiliMode(); }
+  function setVMusicMode(m){ VMusicMode = m; try { localStorage.setItem('radio.vMusic.mode', VMusicMode); } catch (e) {} applyVMusicMode(); }
   
     const finalCover = albumUrl || '';
     audioBar.style.display = 'flex';
@@ -412,7 +413,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (musicSource === 'bili' && biliFloat && biliVideo) {
         biliFloat.style.display = 'block';
         try { biliVideo.src = musicUrl; biliVideo.muted = true; biliVideo.play(); } catch (e) { }
-        applyBiliMode();
+        applyVMusicMode();
       } else {
         if (biliFloat) biliFloat.style.display = 'none';
         if (biliToolbar) biliToolbar.style.display = 'none';
@@ -765,12 +766,14 @@ function mountYrc2_pair(yrc) {
         s.id = 'karaoke-style-stream';
         s.textContent = `
           .karaoke-word { position: relative; display: inline-block; }
+          .karaoke-word.sung, .karaoke-word.playing { transform: translateY(-1px); }
           .karaoke-word::after {
              content: attr(data-text); position: absolute; left: 0; top: 0;
              color: #fff; width: var(--k-width, 0%); overflow: hidden; white-space: pre;
-             pointer-events: none; transition: width 0.1s linear;
-             /* text-shadow: 0 0 10px rgba(255,255,255,0.8); removed shadow */
+             pointer-events: none; transition: width 0.08s cubic-bezier(0.25, 0.46, 0.45, 0.94);
              will-change: width;
+             -webkit-mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 8px), transparent 100%);
+             mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 8px), transparent 100%);
           }
           .row.origin span { position: relative; color: rgba(255,255,255,0.55); }
         `;
@@ -788,9 +791,11 @@ function mountYrc2_pair(yrc) {
           s.dataset.text = w.tx;
           s.dataset.t = w.t; 
           s.dataset.d = w.d; 
-          if (kind === 'origin') s.classList.add('karaoke-word');
-          // s.style.transition = `opacity ${Math.max(0, w.d)}ms ease-out`; 
-          // s.style.opacity = '0.55'; 
+          if (kind === 'origin') {
+            s.classList.add('karaoke-word');
+            const dur = parseInt(w.d || 0, 10) || 200;
+            s.style.transition = `transform ${dur}ms cubic-bezier(0.34, 1.56, 0.64, 1)`;
+          }
           s.style.display = 'inline-block'; 
           row.appendChild(s); 
           const next = line.c[i + 1]; 
@@ -878,9 +883,26 @@ function mountYrc2_pair(yrc) {
     el.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length === 1) { const dy = Math.abs(e.touches[0].clientY - touchStartY); if (dy > 5) userScrollTs = Date.now(); } });
     function update() {
       const t = audio.currentTime * 1000;
+      const offsetMs = parseInt(localStorage.getItem('radio.lyric.offset.ms') || '100', 10) || 100;
+      const tOffset = t + offsetMs;
       const lines = Array.from(el.querySelectorAll('.line'));
       let active = null;
-      for (let i = 0; i < lines.length; i++) { const c = lines[i]; const lt = parseInt(c.dataset.t || '0', 10); const ld = parseInt(c.dataset.d || '0', 10); if (t >= lt && t < lt + ld) { active = c; break; } }
+      
+      // Find active line: current line or last passed line (keep highlight until next line starts)
+      for (let i = 0; i < lines.length; i++) {
+        const c = lines[i];
+        const lt = parseInt(c.dataset.t || '0', 10);
+        const ld = parseInt(c.dataset.d || '0', 10);
+        const le = lt + ld;
+        const next = lines[i + 1];
+        const nextT = next ? parseInt(next.dataset.t || '0', 10) : Infinity;
+        
+        if (tOffset >= lt && tOffset < nextT) {
+          active = c;
+          break;
+        }
+      }
+      
       lines.forEach((c) => {
         const rows = c.querySelectorAll('.row');
         const isActive = (c === active);
@@ -893,29 +915,39 @@ function mountYrc2_pair(yrc) {
             const sd = parseInt(s.dataset.d || '0', 10);
             const se = st + sd;
             
-            // Karaoke Effect logic
+            // Karaoke Effect logic - use offset for word matching
             if (isActive && isTrans === false) { // Only for active origin line
-                if (t >= st && t < se) {
+                if (tOffset >= st && tOffset < se) {
                     // Current word playing
-                    const progress = (t - st) / Math.max(1, sd);
+                    const progress = (tOffset - st) / Math.max(1, sd);
                     const pct = Math.min(100, Math.max(0, progress * 100));
                     const cur = parseFloat(s.style.getPropertyValue('--k-width')||'0');
                     if (Math.abs(cur - pct) > 0.5) { 
                         s.style.setProperty('--k-width', `${pct}%`);
                     }
-                } else if (t >= se) {
+                    s.classList.remove('sung');
+                    s.classList.add('playing');
+                } else if (tOffset >= se) {
                     // Passed word - LOCK to 100%
                     s.style.setProperty('--k-width', '100%');
+                    s.classList.remove('playing');
+                    s.classList.add('sung');
                 } else {
                     // Future word
                     s.style.setProperty('--k-width', '0%');
+                    s.classList.remove('playing');
+                    s.classList.remove('sung');
                 }
             } else {
                 // Not active line or translation
-                if (t >= se) { // Already passed lines
+                if (tOffset >= se) { // Already passed lines
                     s.style.setProperty('--k-width', '100%');
+                    s.classList.remove('playing');
+                    if (!isTrans) s.classList.add('sung');
                 } else {
                     s.style.setProperty('--k-width', '0%');
+                    s.classList.remove('playing');
+                    s.classList.remove('sung');
                 }
             }
           });
@@ -1021,11 +1053,14 @@ function mountYrc2_pair(yrc) {
                position: relative;
                display: inline-block;
             }
+            .karaoke-word.sung, .karaoke-word.playing { transform: translateY(-1px); }
             .karaoke-word::after {
              content: attr(data-text); position: absolute; left: 0; top: 0;
              color: #fff; width: var(--k-width, 0%); overflow: hidden; white-space: pre;
-             pointer-events: none; transition: width 0.1s linear;
+             pointer-events: none; transition: width 0.08s cubic-bezier(0.25, 0.46, 0.45, 0.94);
              will-change: width;
+             -webkit-mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 8px), transparent 100%);
+             mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 8px), transparent 100%);
           }
           .karaoke-word::before {
              content: attr(data-text); position: absolute; left: 0; top: 0;
@@ -1077,7 +1112,11 @@ function mountYrc2_pair(yrc) {
           s.dataset.text = w.tx;
           s.dataset.t = w.t; 
           s.dataset.d = w.d;
-          if (kind === 'origin') s.classList.add('karaoke-word');
+          if (kind === 'origin') {
+            s.classList.add('karaoke-word');
+            const dur = parseInt(w.d || 0, 10) || 200;
+            s.style.transition = `transform ${dur}ms cubic-bezier(0.34, 1.56, 0.64, 1)`;
+          }
           s.style.display = 'inline-block'; 
           row.appendChild(s); 
           const next = line.c[i + 1]; 
@@ -1132,32 +1171,29 @@ function mountYrc2_pair(yrc) {
 
     function update() {
       const t = audio.currentTime * 1000;
+      const offsetMs = parseInt(localStorage.getItem('radio.lyric.offset.ms') || '100', 10) || 100;
+      const tOffset = t + offsetMs;
       const lines = Array.from(el.querySelectorAll('.line:not(.waiting-dots-line)'));
       let active = null;
       let gapNextLine = null;
 
+      // Find active line: current line or last passed line (keep highlight until next line starts)
       for (let i = 0; i < lines.length; i++) {
          const c = lines[i];
          const lt = parseInt(c.dataset.t || '0', 10);
          const ld = parseInt(c.dataset.d || '0', 10);
          const le = lt + ld;
+         const next = lines[i + 1];
+         const nextT = next ? parseInt(next.dataset.t || '0', 10) : Infinity;
          
-         if (t >= lt && t < le) {
+         if (tOffset >= lt && tOffset < nextT) {
              active = c;
-             break; // Found active line
-         }
-         
-         // Check for gap after this line
-         const next = lines[i+1];
-         if (next) {
-             const nextT = parseInt(next.dataset.t || '0', 10);
-             if (t >= le && t < nextT) {
-                 // We are in a gap
-                 if (nextT - le > 3000) { // Increased threshold to 3s to avoid rapid flashes
-                     gapNextLine = next;
-                 }
-                 break;
+             // Check for long gap (show dots)
+             if (tOffset >= le && nextT - le > 3000) {
+                 gapNextLine = next;
+                 active = null; // Don't highlight during long gap
              }
+             break;
          }
       }
 
@@ -1234,10 +1270,10 @@ function mountYrc2_pair(yrc) {
             const sd = parseInt(s.dataset.d || '0', 10);
             const se = st + sd;
             
-            // Karaoke Logic Stream
+            // Karaoke Logic Stream - use offset for word matching
             if (isActive && isTrans === false) {
-                 if (t >= st && t < se) {
-                     const pct = Math.min(100, Math.max(0, ((t - st) / Math.max(1, sd)) * 100));
+                 if (tOffset >= st && tOffset < se) {
+                     const pct = Math.min(100, Math.max(0, ((tOffset - st) / Math.max(1, sd)) * 100));
                      const cur = parseFloat(s.style.getPropertyValue('--k-width')||'0');
                      if (Math.abs(cur - pct) > 0.5) {
                          s.style.setProperty('--k-width', `${pct}%`);
@@ -1245,20 +1281,30 @@ function mountYrc2_pair(yrc) {
                      // Long word shadow
                      if (sd > 600) s.classList.add('long-word-active');
                      else s.classList.remove('long-word-active');
-                 } else if (t >= se) {
+                     s.classList.remove('sung');
+                     s.classList.add('playing');
+                 } else if (tOffset >= se) {
                      s.style.setProperty('--k-width', '100%');
                      s.classList.remove('long-word-active');
+                     s.classList.remove('playing');
+                     s.classList.add('sung');
                  } else {
                      s.style.setProperty('--k-width', '0%');
                      s.classList.remove('long-word-active');
+                     s.classList.remove('playing');
+                     s.classList.remove('sung');
                  }
             } else {
-                 if (t >= se) {
+                 if (tOffset >= se) {
                      s.style.setProperty('--k-width', '100%');
                      s.classList.remove('long-word-active');
+                     s.classList.remove('playing');
+                     if (!isTrans) s.classList.add('sung');
                  } else {
                      s.style.setProperty('--k-width', '0%');
                      s.classList.remove('long-word-active');
+                     s.classList.remove('playing');
+                     s.classList.remove('sung');
                  }
             }
           });
@@ -1296,8 +1342,8 @@ function mountYrc2_pair(yrc) {
   audio.addEventListener('ratechange', updatePlaybackState);
   audio.addEventListener('durationchange', updatePlaybackState);
   audio.addEventListener('timeupdate', () => { if (biliVideo && musicSource === 'bili') { try { const dt = Math.abs((biliVideo.currentTime||0) - (audio.currentTime||0)); if (dt > 0.5) biliVideo.currentTime = audio.currentTime; } catch (e) { } } });
-  if (biliCollapseBtn) biliCollapseBtn.onclick = () => { setBiliMode(biliMode === 'hidden' ? 'float' : 'hidden'); };
-  if (biliExpandBtn) biliExpandBtn.onclick = () => { setBiliMode(biliMode === 'expand' ? 'float' : 'expand'); };
+  if (biliCollapseBtn) biliCollapseBtn.onclick = () => { setVMusicMode(VMusicMode === 'hidden' ? 'float' : 'hidden'); };
+  if (biliExpandBtn) biliExpandBtn.onclick = () => { setVMusicMode(VMusicMode === 'expand' ? 'float' : 'expand'); };
   try { if (bgModePanel) { const items = bgModePanel.querySelectorAll('.bgmode-item'); items.forEach((el) => { el.onclick = () => { try { const m = el.dataset.mode || 'blur'; localStorage.setItem('radio.bgmode', m); bgModePanel.style.display = 'none'; applyBackgroundCurrent(); } catch (e) {} }; }); } } catch (e) {}
   let isDragging = false;
   function seekByClientX(x){ if (!audio.duration) return; const rect = progressBar.getBoundingClientRect(); const pct = Math.max(0, Math.min(1, (x - rect.left) / rect.width)); audio.currentTime = pct * audio.duration; }
@@ -1469,17 +1515,127 @@ function mountYrc2_pair(yrc) {
            setTimeout(scrollToActive, 100);
       }
 
-      try { const tt = document.getElementById('playlistTotalText'); if (tt) tt.textContent = `总时长：${fmt(data.totalSecs || 0)}`; } catch (e) { } try { const finEl = document.getElementById('playlistFinish'); if (finEl) { const startIdx = Math.max(0, data.currentIndex || 0); const remainList = Array.isArray(data.items) ? data.items.slice(startIdx) : []; const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const dt = new Date(Date.now() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } } catch (e) { } if (empty) empty.style.display = (data.items.length === 0) ? 'flex' : 'none'; if (!musicUrl && data.items.length > 0) { const last = data.items[data.items.length - 1]; try { if (last) { document.getElementById('audioCover').src = last.cover || ''; document.getElementById('audioTitle').textContent = last.title || ''; document.getElementById('audioArtist').textContent = last.artist || ''; } } catch (e) { } }
+      try { 
+        const tt = document.getElementById('playlistTotalText'); 
+        if (tt) tt.textContent = `总时长 ${fmt(data.totalSecs || 0)}`; 
+        const countEl = document.getElementById('playlistCountText');
+        const totalCountEl = document.getElementById('playlistTotalCount');
+        if (countEl) {
+          const curIdx = (data.currentIndex >= 0) ? (data.currentIndex + 1) : 0;
+          countEl.textContent = curIdx;
+        }
+        if (totalCountEl) {
+          totalCountEl.textContent = `${data.items.length}`;
+        }
+      } catch (e) { }
+      if (empty) empty.style.display = (data.items.length === 0) ? 'flex' : 'none';
+      const sourceTextEl = document.getElementById('audioSourceText');
+      if (data.items.length > 0 && data.currentIndex >= 0 && data.currentIndex < data.items.length) {
+        const curItem = data.items[data.currentIndex];
+        if (sourceTextEl && curItem) {
+          const sourceNames = { kuwo: '酷我', bili: 'Bilibili', local: '本地' };
+          const srcName = sourceNames[curItem.source] || curItem.source || '--';
+          sourceTextEl.textContent = `音源: ${srcName}`;
+        }
+      } else if (sourceTextEl) {
+        sourceTextEl.textContent = '音源: --';
+      }
+      if (!musicUrl && data.items.length > 0 && data.currentIndex >= 0 && data.currentIndex < data.items.length) {
+        const cur = data.items[data.currentIndex];
+        try {
+          if (cur) {
+            document.getElementById('audioCover').src = cur.cover || '';
+            document.getElementById('audioTitle').textContent = cur.title || '';
+            document.getElementById('audioArtist').textContent = cur.artist || '';
+            if (cur.cover) {
+              const mode = localStorage.getItem('radio.bgmode') || 'blur';
+              if (mode === 'shine') applyFluentShine(cur.cover);
+              else applyBlurBackground(cur.cover);
+            }
+          }
+        } catch (e) { }
+      }
     } catch (e) { }
   }
   let lastFinishUpdateTs = 0;
-  async function updateFinishEstimate() { try { const finEl = document.getElementById('playlistFinish'); if (!finEl) return; if (Date.now() - lastFinishUpdateTs < 3000) return; lastFinishUpdateTs = Date.now(); const r = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []); const data = r && r.result ? r.result : r; if (!data || !Array.isArray(data.items)) return; const startIdx = Math.max(0, data.currentIndex || 0); const remainList = data.items.slice(startIdx); const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0)); const base = await getSystemNow(); const dt = new Date(base.getTime() + remainSecs * 1000); const hh = String(dt.getHours()).padStart(2, '0'); const mm = String(dt.getMinutes()).padStart(2, '0'); finEl.textContent = `预计播完：${hh}:${mm}`; } catch (e) { } }
+  let cachedEndTime = '';
+  let cachedPauseAtEndTime = false;
+  let lastSettingsLoadTs = 0;
+  async function loadEndTimeSettings() {
+    try {
+      const r = await window.lowbarAPI.pluginCall('music-radio', 'getSettings', []);
+      const s = r && r.result ? r.result.settings : (r && r.settings ? r.settings : {});
+      cachedEndTime = s.endTime || '';
+      cachedPauseAtEndTime = !!s.pauseAtEndTime;
+      lastSettingsLoadTs = Date.now();
+    } catch (e) { }
+  }
+  loadEndTimeSettings();
+  async function updateFinishEstimate() {
+    try {
+      const finBtn = document.getElementById('audioFinishBtn');
+      const finText = document.getElementById('audioFinishText');
+      if (!finBtn || !finText) return;
+      
+      if (Date.now() - lastSettingsLoadTs > 10000) {
+        await loadEndTimeSettings();
+      }
+      
+      if (Date.now() - lastFinishUpdateTs < 1000) return;
+      lastFinishUpdateTs = Date.now();
+      
+      const r = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []);
+      const data = r && r.result ? r.result : r;
+      if (!data || !Array.isArray(data.items)) return;
+      
+      const startIdx = Math.max(0, data.currentIndex || 0);
+      const remainList = data.items.slice(startIdx);
+      const remainSecs = Math.max(0, remainList.reduce((acc, it) => acc + (Number(it.duration) || 0), 0) - Math.floor(Number(audio.currentTime) || 0));
+      const base = await getSystemNow();
+      const finishTime = new Date(base.getTime() + remainSecs * 1000);
+      const hh = String(finishTime.getHours()).padStart(2, '0');
+      const mm = String(finishTime.getMinutes()).padStart(2, '0');
+      
+      if (cachedEndTime) {
+        const parts = cachedEndTime.split(':');
+        const th = parseInt(parts[0], 10);
+        const tm = parseInt(parts[1], 10);
+        const now = base;
+        const deadlineToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), th, tm, 0, 0);
+        
+        const diffMs = deadlineToday.getTime() - now.getTime();
+        const diffSecs = Math.floor(diffMs / 1000);
+        
+        if (diffSecs > 0 && diffSecs <= 600) {
+          finBtn.classList.add('warning');
+          finText.textContent = `距离 ${cachedEndTime} 还剩${diffSecs}s`;
+          return;
+        } else if (diffSecs <= 0) {
+          finBtn.classList.remove('warning');
+          finText.textContent = `${hh}:${mm}播完`;
+          return;
+        }
+      }
+      
+      finBtn.classList.remove('warning');
+      finText.textContent = `${hh}:${mm}播完`;
+    } catch (e) { }
+  }
   try { audio.addEventListener('timeupdate', updateFinishEstimate); } catch (e) { }
   loadPlaylist();
   try { const ch = new URL(location.href).searchParams.get('channel'); if (ch) { window.lowbarAPI.subscribe?.(ch); window.lowbarAPI.onEvent?.((name, payload) => { if (name === ch && payload && (payload.type === 'update' || payload.type === 'control')) { 
         if (payload.type === 'control') {
             if (payload.command === 'pause') { try { audio.pause(); } catch(e){} }
             else if (payload.command === 'play') { try { audio.play(); } catch(e){} }
+            return;
+        }
+        if (payload.target === 'backgroundUrl') {
+            try {
+                const newUrl = payload.value;
+                if (newUrl) {
+                    location.href = newUrl;
+                }
+            } catch (e) { }
             return;
         }
         if (payload.target === 'playlist') { loadPlaylist(); try { applyBackgroundCurrent(); } catch (e) {} (async () => { try { const r2 = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []); const d2 = r2 && r2.result ? r2.result : r2; if (d2 && Array.isArray(d2.items) && d2.currentIndex >= 0) { const cur = d2.items[d2.currentIndex];

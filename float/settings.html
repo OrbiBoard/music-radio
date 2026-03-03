@@ -101,6 +101,17 @@
         </div>
         
         <div class="group">
+          <div class="group-title">歌词设置</div>
+          <div class="row">
+            <div>
+              <label>歌词提前量 (ms)</label>
+              <div class="desc">歌词逐字匹配提前显示的时间，正值提前、负值延后</div>
+            </div>
+            <input type="number" id="lyricOffsetMs" style="width:80px;" min="-500" max="500" step="50">
+          </div>
+        </div>
+        
+        <div class="group">
           <div class="group-title">调试工具</div>
           <div class="row">
             <label>调试歌词窗口</label>
@@ -304,6 +315,7 @@
       // General
       const endTimeInput = document.getElementById('endTime');
       const pauseAtEndTimeInput = document.getElementById('pauseAtEndTime');
+      const lyricOffsetMsInput = document.getElementById('lyricOffsetMs');
       const openDebug = document.getElementById('openDebug');
       
       // Background
@@ -363,6 +375,7 @@
         flowingSpeedEl.value = String(read('radio.bg.flowing.speed','1.0'));
         flowingReactiveEl.checked = read('radio.bg.flowing.audioReactive','0') !== '0';
         spectrumEnabledEl.checked = read('radio.spectrum.enabled','1') !== '0';
+        if (lyricOffsetMsInput) lyricOffsetMsInput.value = String(read('radio.lyric.offset.ms','300'));
         updateBgUI();
         
         // Download
@@ -384,6 +397,10 @@
       });
       if (pauseAtEndTimeInput) pauseAtEndTimeInput.addEventListener('change', async () => {
         try { await window.lowbarAPI.pluginCall('music-radio', 'setPauseAtEndTime', [pauseAtEndTimeInput.checked]); } catch (e) {}
+      });
+      if (lyricOffsetMsInput) lyricOffsetMsInput.addEventListener('change', () => {
+        const val = parseInt(lyricOffsetMsInput.value, 10) || 0;
+        write('radio.lyric.offset.ms', val);
       });
       if (openDebug) openDebug.addEventListener('click', () => {
         try { window.lowbarAPI.pluginCall('music-radio','onLowbarEvent',[{ type:'click', id:'btn-debug-lyrics' }]); } catch (e) {}

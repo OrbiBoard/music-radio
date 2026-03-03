@@ -190,3 +190,8 @@ html, body {
 .bgmode-panel { position:absolute; right:16px; bottom:96px; background:var(--panel-bg); backdrop-filter: blur(10px); border:1px solid var(--border); border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.35); padding:8px; display:flex; flex-direction:column; gap:6px; z-index:1000; }
 .bgmode-item { padding:6px 10px; border-radius:8px; cursor:pointer; color:var(--fg); }
 .bgmode-item:hover { background:var(--item-hover); }
+.audio-finish-btn { border: 0; background: rgba(255,255,255,0.08); color: var(--muted); cursor: pointer; font-size: 12px; padding: 4px 10px; border-radius: 6px; display: flex; align-items: center; gap: 4px; transition: all 0.2s; white-space: nowrap; }
+.audio-finish-btn:hover { background: rgba(255,255,255,0.15); color: var(--fg); }
+.audio-finish-btn.warning { background: rgba(255, 100, 100, 0.2); color: #f88; }
+.audio-finish-btn.warning:hover { background: rgba(255, 100, 100, 0.3); }
+.audio-finish-btn i { font-size: 14px; }

@@ -693,6 +693,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     } catch (e) {} 
   }
+
   async function renderLyrics(item) {
     try {
       const le = document.getElementById('lyrics'); if (le) le.textContent = '';
@@ -704,7 +705,6 @@ window.addEventListener('DOMContentLoaded', () => {
       if (!data || !data.ok) return;
 
       if (data.format === 'lrcx' && data.dataBase64) {
-          // Handle Kuwo LRCX
           const bin = atob(String(data.dataBase64 || ''));
           const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
           let text = '';
@@ -712,13 +712,13 @@ window.addEventListener('DOMContentLoaded', () => {
           const yrc = lrcxToYrcArr(text);
           mountYrc2_stream(yrc);
       } else if (data.content) {
-          // Handle Standard LRC
           const yrc = parseLrcToYrc(data.content);
           mountYrc2_stream(yrc);
       }
     } catch (e) { }
     finally { if (lyricsLoading) lyricsLoading.style.display = 'none'; }
   }
+
   function parseLrcToYrc(lrc) {
     const lines = String(lrc || '').split('\n').filter(l => l.trim());
     const yrc = [];
@@ -1357,6 +1357,70 @@ function mountYrc2_pair(yrc) {
     window.addEventListener('touchend', () => { isDragging = false; });
   }
   audio.addEventListener('ended', async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'nextTrack', ['ended']); } catch (e) { } });
+  
+  // Source playlist modal (for showing pages/seasons)
+  let sourcePlaylistModal = null;
+  
+  function showSourcePlaylistModal(items, title) {
+    if (!sourcePlaylistModal) {
+      sourcePlaylistModal = document.createElement('div');
+      sourcePlaylistModal.id = 'sourcePlaylistModal';
+      sourcePlaylistModal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;display:none;align-items:center;justify-content:center;';
+      sourcePlaylistModal.innerHTML = `
+        <div style="background:#1a1a1a;border-radius:12px;max-width:600px;max-height:80vh;width:90%;display:flex;flex-direction:column;">
+          <div style="padding:16px;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+              <div id="spModalTitle" style="font-size:16px;font-weight:600;color:#fff;"></div>
+            </div>
+            <button id="spModalClose" style="background:none;border:none;color:#888;font-size:24px;cursor:pointer;">&times;</button>
+          </div>
+          <div id="spModalList" style="flex:1;overflow-y:auto;padding:8px;"></div>
+          <div style="padding:12px;border-top:1px solid rgba(255,255,255,0.1);display:flex;gap:8px;justify-content:flex-end;">
+            <button id="spModalAddAll" style="background:#6ab4ff;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">全部添加到播放列表</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(sourcePlaylistModal);
+      sourcePlaylistModal.querySelector('#spModalClose').onclick = () => { sourcePlaylistModal.style.display = 'none'; };
+      sourcePlaylistModal.onclick = (e) => { if (e.target === sourcePlaylistModal) sourcePlaylistModal.style.display = 'none'; };
+    }
+    
+    sourcePlaylistModal.querySelector('#spModalTitle').textContent = title || '列表';
+    const list = sourcePlaylistModal.querySelector('#spModalList');
+    list.innerHTML = '';
+    const fmt = (s) => { const n = Math.floor(Number(s) || 0); const m = Math.floor(n / 60); const r = n % 60; return `${m}:${String(r).padStart(2, '0')}`; };
+    
+    items.forEach((it, idx) => {
+      const item = document.createElement('div');
+      item.style.cssText = 'display:flex;align-items:center;padding:10px 12px;border-radius:6px;cursor:pointer;transition:background 0.2s;';
+      item.innerHTML = `
+        <div style="width:24px;color:#888;font-size:12px;">${idx + 1}</div>
+        <div style="flex:1;color:#eee;font-size:14px;margin-left:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.title || '未命名'}</div>
+        <div style="color:#888;font-size:12px;">${fmt(it.duration)}</div>
+      `;
+      item.onmouseenter = () => item.style.background = 'rgba(255,255,255,0.1)';
+      item.onmouseleave = () => item.style.background = 'transparent';
+      item.onclick = async () => {
+        try {
+          await window.lowbarAPI.pluginCall('music-radio', 'enqueueTail', [it]);
+          sourcePlaylistModal.style.display = 'none';
+        } catch (e) { }
+      };
+      list.appendChild(item);
+    });
+    
+    sourcePlaylistModal.querySelector('#spModalAddAll').onclick = async () => {
+      try {
+        for (const it of items) {
+          await window.lowbarAPI.pluginCall('music-radio', 'enqueueTail', [it]);
+        }
+        sourcePlaylistModal.style.display = 'none';
+      } catch (e) { }
+    };
+    
+    sourcePlaylistModal.style.display = 'flex';
+  }
+  
   let lastPlaylistInteraction = 0;
   async function loadPlaylist() {
     try {
@@ -1493,6 +1557,33 @@ function mountYrc2_pair(yrc) {
         actions.appendChild(btnDel);
         if (idx < data.items.length - 1) actions.appendChild(btnBottom);
         if (idx !== data.currentIndex && idx !== data.currentIndex + 1) actions.appendChild(btnNext);
+        
+        // Source-specific context menu items
+        (async () => {
+          try {
+            const r = await window.lowbarAPI.pluginCall('music-radio', 'getSourceContextMenuItems', [it]);
+            const items = r && r.result ? r.result : (r || []);
+            items.forEach((menuItem, menuIdx) => {
+              const btn = document.createElement('button');
+              btn.innerHTML = `<i class="${menuItem.icon || 'ri-menu-line'}"></i> ${menuItem.label || ''}`;
+              btn.title = menuItem.label || '';
+              btn.onclick = async (e) => {
+                e.stopPropagation();
+                try {
+                  const ar = await window.lowbarAPI.pluginCall('music-radio', 'executeContextMenuHandler', [it, menuIdx]);
+                  if (ar && ar.ok) {
+                    if (ar.type === 'playlist' && ar.items) {
+                      showSourcePlaylistModal(ar.items, ar.title || '列表');
+                    }
+                  } else if (ar && ar.error) {
+                    alert(ar.error);
+                  }
+                } catch (err) { }
+              };
+              actions.appendChild(btn);
+            });
+          } catch (e) { }
+        })();
         
         menu.appendChild(actions);
         
@@ -1699,6 +1790,35 @@ function mountYrc2_pair(yrc) {
   }
   
   if (downloadBtn) downloadBtn.onclick = async () => { try { await window.lowbarAPI.pluginCall('music-radio', 'downloadCurrent', []); } catch (e) { } };
+
+  const lyricsSearchCancelBtn = document.getElementById('lyricsSearchCancel');
+  if (lyricsSearchCancelBtn) {
+    lyricsSearchCancelBtn.onclick = () => {
+      hideLyricsSearchPanel();
+      hideLyricsCorrectionBtn();
+    };
+  }
+
+  const lyricsCorrectionBtn = document.getElementById('lyricsCorrectionBtn');
+  if (lyricsCorrectionBtn) {
+    lyricsCorrectionBtn.onclick = async () => {
+      try {
+        let item = currentLyricsSearchItem;
+        if (!item) {
+          const r = await window.lowbarAPI.pluginCall('music-radio', 'getPlaylist', []);
+          const data = r && r.result ? r.result : r;
+          if (data && Array.isArray(data.items) && data.currentIndex >= 0 && data.currentIndex < data.items.length) {
+            item = data.items[data.currentIndex];
+          }
+        }
+        if (item) {
+          const settingsR = await window.lowbarAPI.pluginCall('music-radio', 'getSettings', []);
+          const settings = settingsR && settingsR.result ? settingsR.result.settings : (settingsR && settingsR.settings ? settingsR.settings : {});
+          await searchAndShowLyrics(item, settings, false);
+        }
+      } catch (e) { console.error('lyricsCorrectionBtn error', e); }
+    };
+  }
 
   const modes = ['list-loop', 'single-loop', 'sequence', 'random', 'play-once'];
   const modeIcons = {

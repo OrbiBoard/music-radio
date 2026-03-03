@@ -577,27 +577,111 @@ const functions = {
     }
   },
   fetchBiliLyrics: async (item) => {
-    try {
-      const bvid = item.id;
-      const cid = item.cid;
-      const https = require('https');
-      async function fetchJson(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio', 'Accept': 'application/json' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }catch(e){ reject(e); } }); }).on('error', reject); }); }
-      
-      let c = String(cid || '');
-      if (!c || c === 'default') {
-        try {
-          const v = await fetchJson(`https://api.bilibili.com/x/player/pagelist?bvid=${encodeURIComponent(String(bvid||''))}`);
-          c = v && v.data && Array.isArray(v.data) && v.data[0] && v.data[0].cid ? String(v.data[0].cid) : '';
-        } catch (e) { }
-      }
-      if (!c) return { ok: false, error: 'no cid' };
+    return { ok: false, error: 'Bilibili音源暂无内置歌词，请使用备用音源搜索' };
+  },
 
-      async function fetchText(u){ return await new Promise((resolve, reject) => { https.get(u, { headers: { 'User-Agent': 'OrbiBoard/Radio' } }, (res) => { const chunks=[]; res.on('data',(c)=>chunks.push(c)); res.on('end',()=>{ try{ resolve(Buffer.concat(chunks).toString('utf8')); }catch(e){ reject(e); } }); }).on('error', reject); }); }
-      
-      const content = await fetchText(`https://api.3r60.top/v2/bili/t/?bvid=${encodeURIComponent(String(bvid||''))}&cid=${encodeURIComponent(c)}`);
-      return { ok: true, content };
+  searchLyrics: async (query, sourceId = 'kuwo') => {
+    const src = state.sources.get(sourceId);
+    if (!src) return { ok: false, error: 'source not found' };
+    try {
+      const r = await pluginApi.call(src.pluginId, src.methods.search, [query, 1]);
+      if (r && r.ok && r.result) return { ok: true, result: r.result, sourceId, sourceName: src.name };
+      return r;
     } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
+      return { ok: false, error: e.message };
+    }
+  },
+
+  fetchLyricsFromItem: async (item, sourceId = 'kuwo') => {
+    const src = state.sources.get(sourceId);
+    if (!src) return { ok: false, error: 'source not found' };
+    try {
+      const r = await pluginApi.call(src.pluginId, src.methods.getLyrics, [item]);
+      if (r && r.ok && r.result) return r;
+      return r;
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+
+  getBiliPages: async (bvid) => {
+    try {
+      const https = require('https');
+      const data = await new Promise((resolve, reject) => {
+        https.get(`https://api.bilibili.com/x/player/pagelist?bvid=${bvid}`, {
+          headers: { 'User-Agent': 'OrbiBoard/Radio' }
+        }, (res) => {
+          const chunks = [];
+          res.on('data', c => chunks.push(c));
+          res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString())));
+        }).on('error', reject);
+      });
+      if (data && data.data && Array.isArray(data.data)) {
+        return { ok: true, pages: data.data.map(p => ({ cid: p.cid, title: p.part, duration: p.duration })) };
+      }
+      return { ok: false, error: 'no pages' };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+
+  getBiliSeason: async (bvid) => {
+    try {
+      const https = require('https');
+      const data = await new Promise((resolve, reject) => {
+        https.get(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
+          headers: { 'User-Agent': 'OrbiBoard/Radio' }
+        }, (res) => {
+          const chunks = [];
+          res.on('data', c => chunks.push(c));
+          res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString())));
+        }).on('error', reject);
+      });
+      if (data && data.data && data.data.ugc_season) {
+        const season = data.data.ugc_season;
+        const episodes = season.sections && season.sections[0] ? season.sections[0].episodes : [];
+        return { 
+          ok: true, 
+          season: {
+            title: season.title,
+            cover: season.cover,
+            episodes: episodes.map(ep => ({
+              bvid: ep.bvid,
+              title: ep.title,
+              duration: ep.page && ep.page.duration ? ep.page.duration : ep.duration,
+              cover: ep.arc && ep.arc.pic ? ep.arc.pic : ''
+            }))
+          }
+        };
+      }
+      return { ok: false, error: 'no season' };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+
+  getSourceContextMenuItems: (item) => {
+    const srcId = item.source || 'kuwo';
+    const src = state.sources.get(srcId);
+    if (!src || !src.contextMenuItems) return [];
+    try {
+      return src.contextMenuItems(item) || [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  executeContextMenuHandler: async (item, menuIndex) => {
+    const srcId = item.source || 'kuwo';
+    const src = state.sources.get(srcId);
+    if (!src || !src.contextMenuItems) return { ok: false, error: 'no context menu' };
+    try {
+      const items = src.contextMenuItems(item) || [];
+      const menuItem = items[menuIndex];
+      if (!menuItem || !menuItem.handler) return { ok: false, error: 'no handler' };
+      return await menuItem.handler();
+    } catch (e) {
+      return { ok: false, error: e.message };
     }
   },
 
@@ -1200,6 +1284,18 @@ const functions = {
     try { state.settings.pauseAtEndTime = !!flag; saveData('settings'); return { ok: true, value: state.settings.pauseAtEndTime }; }
     catch (e) { return { ok: false, error: e?.message || String(e) }; }
   },
+  setLyricFallbackSource: async (sourceId = 'kuwo') => {
+    try { state.settings.lyricFallbackSource = String(sourceId || 'kuwo'); saveData('settings'); return { ok: true, value: state.settings.lyricFallbackSource }; }
+    catch (e) { return { ok: false, error: e?.message || String(e) }; }
+  },
+  setAutoSearchLyrics: async (flag = false) => {
+    try { state.settings.autoSearchLyrics = !!flag; saveData('settings'); return { ok: true, value: state.settings.autoSearchLyrics }; }
+    catch (e) { return { ok: false, error: e?.message || String(e) }; }
+  },
+  setLyricSearchCountdown: async (seconds = 10) => {
+    try { state.settings.lyricSearchCountdown = Math.max(3, Math.min(30, parseInt(seconds, 10) || 10)); saveData('settings'); return { ok: true, value: state.settings.lyricSearchCountdown }; }
+    catch (e) { return { ok: false, error: e?.message || String(e) }; }
+  },
   getSettings: async () => {
     try { return { ok: true, settings: { ...state.settings } }; }
     catch (e) { return { ok: false, error: e?.message || String(e) }; }
@@ -1374,12 +1470,58 @@ const init = async (api) => {
   state.sources.set('kuwo', {
       name: '酷我',
       pluginId: 'music-radio',
-      methods: { search: 'searchKuwo', getPlayUrl: 'getKuwoPlayUrl', getLyrics: 'fetchKuwoLyrics', getMusicInfo: 'searchKuwo' } // searchKuwo returns items with cover
+      methods: { search: 'searchKuwo', getPlayUrl: 'getKuwoPlayUrl', getLyrics: 'fetchKuwoLyrics', getMusicInfo: 'searchKuwo' }
   });
   state.sources.set('bili', {
       name: 'Bilibili',
       pluginId: 'music-radio',
-      methods: { search: 'searchBili', getPlayUrl: 'getBiliPlayUrl', getLyrics: 'fetchBiliLyrics' }
+      methods: { search: 'searchBili', getPlayUrl: 'getBiliPlayUrl', getLyrics: 'fetchBiliLyrics' },
+      contextMenuItems: (item) => {
+        const bvid = item.id;
+        if (!bvid) return [];
+        return [
+          {
+            label: '查看分P',
+            icon: 'ri-play-list-2-line',
+            handler: async () => {
+              const r = await functions.getBiliPages(bvid);
+              if (r && r.ok && r.pages && r.pages.length > 0) {
+                const items = r.pages.map((p, idx) => ({
+                  id: bvid,
+                  cid: p.cid,
+                  title: p.title || `P${idx + 1}`,
+                  artist: item.title || '',
+                  duration: p.duration,
+                  cover: '',
+                  source: 'bili'
+                }));
+                return { ok: true, type: 'playlist', items, title: `${item.title || '分P列表'} - 共${items.length}个` };
+              }
+              return { ok: false, error: '该视频没有分P' };
+            }
+          },
+          {
+            label: '查看合集',
+            icon: 'ri-folder-music-line',
+            handler: async () => {
+              const r = await functions.getBiliSeason(bvid);
+              if (r && r.ok && r.season) {
+                const items = r.season.episodes.map(ep => ({
+                  id: ep.bvid,
+                  cid: 'default',
+                  title: ep.title,
+                  artist: r.season.title,
+                  duration: ep.duration,
+                  cover: ep.cover,
+                  source: 'bili'
+                }));
+                return { ok: true, type: 'playlist', items, title: `${r.season.title} - 共${items.length}个` };
+              }
+              return { ok: false, error: '该视频不属于任何合集' };
+            }
+          }
+        ];
+      }
   });
 
   // Start Timer Loop

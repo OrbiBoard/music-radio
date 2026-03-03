@@ -123,6 +123,16 @@
         </div>
         <div class="now-right">
           <div id="lyricsLoading" class="loading-card" style="display:none; position:absolute; right:16px; top:16px;"><i class="ri-loader-4-line spin"></i> 正在加载歌词…</div>
+          <div id="lyricsSearchPanel" class="lyrics-search-panel" style="display:none;">
+            <div class="lyrics-search-header">
+              <div class="lyrics-search-title">在 <span id="lyricsSearchSource">酷我</span> 搜索到以下音乐</div>
+              <div class="lyrics-search-countdown"><span id="lyricsSearchCountdown">10</span>秒后应用第一个歌词</div>
+            </div>
+            <div class="lyrics-search-list" id="lyricsSearchList"></div>
+            <div class="lyrics-search-actions">
+              <button id="lyricsSearchCancel" class="lyrics-search-btn">不使用其他歌词</button>
+            </div>
+          </div>
           <div id="lyrics">暂无歌词</div>
           <div id="biliVideoFloat" class="bili-video-float" style="display:none;">
             <video id="biliVideo" playsinline muted></video>

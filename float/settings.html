@@ -316,6 +316,9 @@
       const endTimeInput = document.getElementById('endTime');
       const pauseAtEndTimeInput = document.getElementById('pauseAtEndTime');
       const lyricOffsetMsInput = document.getElementById('lyricOffsetMs');
+      const lyricFallbackSourceInput = document.getElementById('lyricFallbackSource');
+      const autoSearchLyricsInput = document.getElementById('autoSearchLyrics');
+      const lyricSearchCountdownInput = document.getElementById('lyricSearchCountdown');
       const openDebug = document.getElementById('openDebug');
       
       // Background
@@ -375,7 +378,17 @@
         flowingSpeedEl.value = String(read('radio.bg.flowing.speed','1.0'));
         flowingReactiveEl.checked = read('radio.bg.flowing.audioReactive','0') !== '0';
         spectrumEnabledEl.checked = read('radio.spectrum.enabled','1') !== '0';
-        if (lyricOffsetMsInput) lyricOffsetMsInput.value = String(read('radio.lyric.offset.ms','300'));
+        if (lyricOffsetMsInput) lyricOffsetMsInput.value = String(read('radio.lyric.offset.ms','100'));
+        
+        // Lyrics settings from plugin
+        try {
+          const r = await window.lowbarAPI.pluginCall('music-radio', 'getSettings', []);
+          const s = (r && r.result ? r.result.settings : (r && r.settings ? r.settings : {}));
+          if (lyricFallbackSourceInput && s.lyricFallbackSource) lyricFallbackSourceInput.value = s.lyricFallbackSource;
+          if (autoSearchLyricsInput) autoSearchLyricsInput.checked = s.autoSearchLyrics !== false;
+          if (lyricSearchCountdownInput && s.lyricSearchCountdown) lyricSearchCountdownInput.value = s.lyricSearchCountdown;
+        } catch (e) {}
+        
         updateBgUI();
         
         // Download
@@ -401,6 +414,16 @@
       if (lyricOffsetMsInput) lyricOffsetMsInput.addEventListener('change', () => {
         const val = parseInt(lyricOffsetMsInput.value, 10) || 0;
         write('radio.lyric.offset.ms', val);
+      });
+      if (lyricFallbackSourceInput) lyricFallbackSourceInput.addEventListener('change', async () => {
+        try { await window.lowbarAPI.pluginCall('music-radio', 'setLyricFallbackSource', [lyricFallbackSourceInput.value]); } catch (e) {}
+      });
+      if (autoSearchLyricsInput) autoSearchLyricsInput.addEventListener('change', async () => {
+        try { await window.lowbarAPI.pluginCall('music-radio', 'setAutoSearchLyrics', [autoSearchLyricsInput.checked]); } catch (e) {}
+      });
+      if (lyricSearchCountdownInput) lyricSearchCountdownInput.addEventListener('change', async () => {
+        const val = parseInt(lyricSearchCountdownInput.value, 10) || 10;
+        try { await window.lowbarAPI.pluginCall('music-radio', 'setLyricSearchCountdown', [val]); } catch (e) {}
       });
       if (openDebug) openDebug.addEventListener('click', () => {
         try { window.lowbarAPI.pluginCall('music-radio','onLowbarEvent',[{ type:'click', id:'btn-debug-lyrics' }]); } catch (e) {}

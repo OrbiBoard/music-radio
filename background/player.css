@@ -32,8 +32,8 @@ html, body {
 .playlist .items::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
 .playlist .items::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 .now-left { width: 40%; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 16px; margin-left: 2vw; }
-.cover-wrap { width: 100%; display:flex; justify-content:flex-start; }
-.now-cover { width: clamp(160px, 22vw, 320px); height: clamp(160px, 22vw, 320px); object-fit: cover; border-radius: 16px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+.cover-wrap { display: flex; justify-content: flex-start; }
+.now-cover { width: clamp(160px, 22vw, 320px); height: auto; object-fit: cover; border-radius: 16px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
 .now-meta { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .now-title { font-size: 36px; font-weight: 700; letter-spacing: 0.5px; text-shadow: 0 2px 12px rgba(0,0,0,0.35); }
 .now-artist { font-size: 18px; color: var(--muted); }
@@ -195,3 +195,24 @@ html, body {
 .audio-finish-btn.warning { background: rgba(255, 100, 100, 0.2); color: #f88; }
 .audio-finish-btn.warning:hover { background: rgba(255, 100, 100, 0.3); }
 .audio-finish-btn i { font-size: 14px; }
+.lyrics-search-panel { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(10px); z-index: 100; display: flex; flex-direction: column; padding: 20px; border-radius: 12px; }
+.lyrics-search-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.lyrics-search-title { font-size: 14px; color: var(--fg); }
+.lyrics-search-title span { color: #6ab4ff; font-weight: 600; }
+.lyrics-search-countdown { font-size: 12px; color: var(--muted); background: rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 12px; }
+.lyrics-search-countdown span { color: #f88; font-weight: 600; }
+.lyrics-search-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.lyrics-search-item { display: flex; align-items: center; padding: 12px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+.lyrics-search-item:hover { background: rgba(255,255,255,0.1); }
+.lyrics-search-item.selected { background: rgba(106,180,255,0.2); border: 1px solid rgba(106,180,255,0.4); }
+.lyrics-search-item-info { flex: 1; }
+.lyrics-search-item-title { font-size: 14px; color: var(--fg); margin-bottom: 4px; }
+.lyrics-search-item-artist { font-size: 12px; color: var(--muted); }
+.lyrics-search-item-apply { padding: 6px 12px; background: #6ab4ff; color: #fff; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; }
+.lyrics-search-item-apply:hover { background: #5a9aee; }
+.lyrics-search-actions { margin-top: 16px; display: flex; justify-content: center; }
+.lyrics-search-btn { padding: 8px 16px; background: rgba(255,255,255,0.1); color: var(--muted); border: none; border-radius: 8px; font-size: 13px; cursor: pointer; transition: all 0.2s; }
+.lyrics-search-btn:hover { background: rgba(255,255,255,0.15); color: var(--fg); }
+.lyrics-correction-btn { position: absolute; right: 16px; bottom: 16px; width: 32px; height: 32px; background: rgba(255,255,255,0.1); border: none; border-radius: 8px; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; z-index: 100; pointer-events: auto; }
+.lyrics-correction-btn:hover { background: rgba(255,255,255,0.2); color: var(--fg); }
+.lyrics-correction-btn i { font-size: 16px; }

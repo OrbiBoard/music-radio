@@ -8,6 +8,9 @@
   "author": "OrbiBoard",
   "icon": "ri-radio-line",
   "description": "音乐电台：提供音乐播放、搜索、推荐等功能。",
+  "dependencies": [
+    "ui-lowbar"
+  ],
   "actions": [
     {
       "id": "openRadio",
